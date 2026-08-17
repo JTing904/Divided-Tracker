@@ -108,12 +108,15 @@ private class ColdStartInterceptor : Interceptor {
         val IDEMPOTENT = setOf("GET", "HEAD")
 
         /**
-         * Long enough for a container to boot, short enough that a user staring at a spinner
-         * is told something before they give up. Measured against this project's own free-tier
-         * deployment, a boot from cold has run past three minutes, so this is deliberately not
-         * an attempt to outwait the worst case.
+         * Sized from a measurement, not a guess.
+         *
+         * A timed cold wake of this project's own free-tier deployment took 104 seconds end to
+         * end: about 8 for the host to start the container, 85 for the JVM and Spring context,
+         * and 11 more for the servlet to initialise on that first request. The first attempt
+         * has already spent the client's twenty-second read timeout, so this covers the rest
+         * with margin for a slower day, without waiting forever on a server that is simply gone.
          */
-        const val COLD_START_READ_SECONDS = 60
+        const val COLD_START_READ_SECONDS = 120
     }
 }
 

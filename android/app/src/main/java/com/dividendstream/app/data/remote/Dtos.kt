@@ -253,8 +253,8 @@ data class AppVersionDto(
     val commit: String? = null,
     val latestClient: String? = null,
     val minimumClient: String? = null,
-    val startedAt: Instant? = null,
-    val uptimeSeconds: Long = 0,
+    val readyAt: Instant? = null,
+    val uptimeSeconds: Long? = null,
 )
 
 // --- mapping into the calculator's input -------------------------------------

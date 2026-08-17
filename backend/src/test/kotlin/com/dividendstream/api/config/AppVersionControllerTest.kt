@@ -6,32 +6,37 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 class AppVersionControllerTest {
 
-    private val boot = Instant.parse("2026-08-17T08:00:00Z")
+    private val ready = Instant.parse("2026-08-17T08:53:14Z")
 
-    /** Reports [boot] once, then [boot] plus [advance] on every later reading. */
-    private class SteppingClock(private val readings: Iterator<Instant>) : Clock() {
-        override fun instant(): Instant = readings.next()
-        override fun getZone() = ZoneOffset.UTC
-        override fun withZone(zone: java.time.ZoneId?) = this
+    /** Hands out each instant in turn, so successive readings can differ. */
+    private class SteppingClock(instants: List<Instant>) : Clock() {
+        private val readings = instants.iterator()
+        private var last = instants.first()
+        override fun instant(): Instant {
+            if (readings.hasNext()) last = readings.next()
+            return last
+        }
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: ZoneId?): Clock = this
     }
 
+    private fun readinessClock(advance: Duration = Duration.ofSeconds(22)): ReadinessClock =
+        ReadinessClock(SteppingClock(listOf(ready, ready.plus(advance)))).also { it.markReady() }
+
     private fun controller(
-        properties: ReleaseProperties,
-        advance: Duration = Duration.ofMinutes(3),
-    ) = AppVersionController(
-        releaseProperties = properties,
-        clock = SteppingClock(listOf(boot, boot.plus(advance)).iterator()),
-        serviceName = "dividend-stream",
-    )
+        properties: ReleaseProperties = ReleaseProperties(),
+        readiness: ReadinessClock = readinessClock(),
+    ) = AppVersionController(properties, readiness, "dividend-stream")
 
     @Test
     @DisplayName("unset release settings report null, not a claim that the client is current")
     fun `blank configuration becomes null`() {
-        val response = controller(ReleaseProperties()).version()
+        val response = controller().version()
 
         assertThat(response.latestClient).isNull()
         assertThat(response.minimumClient).isNull()
@@ -51,17 +56,6 @@ class AppVersionControllerTest {
     }
 
     @Test
-    @DisplayName("startedAt is when the process booted, and uptime grows from it")
-    fun `uptime is measured from construction`() {
-        // The point of the field: a caller seeing a few seconds of uptime knows it has just
-        // cold-started, which is the difference between "slow" and "was asleep".
-        val response = controller(ReleaseProperties(), advance = Duration.ofMinutes(3)).version()
-
-        assertThat(response.startedAt).isEqualTo(boot)
-        assertThat(response.uptimeSeconds).isEqualTo(180)
-    }
-
-    @Test
     @DisplayName("whitespace is treated as unset, so a stray space cannot become a version")
     fun `whitespace only configuration becomes null`() {
         val response = controller(
@@ -71,5 +65,21 @@ class AppVersionControllerTest {
         assertThat(response.latestClient).isNull()
         assertThat(response.minimumClient).isNull()
         assertThat(response.commit).isNull()
+    }
+
+    @Test
+    @DisplayName("uptime runs from readiness, and both are absent until the app is ready")
+    fun `uptime is measured from application readiness`() {
+        val notYetReady = ReadinessClock(SteppingClock(listOf(ready)))
+        val before = controller(readiness = notYetReady).version()
+
+        // Tomcat accepts connections slightly before the ready event, and "not yet" is a more
+        // useful answer there than a number taken partway through startup.
+        assertThat(before.readyAt).isNull()
+        assertThat(before.uptimeSeconds).isNull()
+
+        val after = controller(readiness = readinessClock(advance = Duration.ofSeconds(22))).version()
+        assertThat(after.readyAt).isEqualTo(ready)
+        assertThat(after.uptimeSeconds).isEqualTo(22)
     }
 }

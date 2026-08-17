@@ -4,8 +4,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import java.time.Clock
-import java.time.Duration
 import java.time.Instant
 
 /**
@@ -23,12 +21,9 @@ import java.time.Instant
 @RequestMapping("/api/app")
 class AppVersionController(
     private val releaseProperties: ReleaseProperties,
-    private val clock: Clock,
+    private val readinessClock: ReadinessClock,
     @Value("\${spring.application.name:dividend-stream}") private val serviceName: String,
 ) {
-
-    /** Fixed at construction, so it reports when this process booted rather than "now". */
-    private val startedAt: Instant = Instant.now(clock)
 
     @GetMapping("/version")
     fun version(): AppVersionResponse = AppVersionResponse(
@@ -36,8 +31,8 @@ class AppVersionController(
         commit = releaseProperties.commit.ifBlank { null },
         latestClient = releaseProperties.latestClient.ifBlank { null },
         minimumClient = releaseProperties.minimumClient.ifBlank { null },
-        startedAt = startedAt,
-        uptimeSeconds = Duration.between(startedAt, Instant.now(clock)).seconds,
+        readyAt = readinessClock.readyAt(),
+        uptimeSeconds = readinessClock.uptimeSeconds(),
     )
 }
 
@@ -50,7 +45,8 @@ data class AppVersionResponse(
     val commit: String?,
     val latestClient: String?,
     val minimumClient: String?,
-    val startedAt: Instant,
-    /** How long this process has been up. A small value means it has just cold-started. */
-    val uptimeSeconds: Long,
+    /** When the application finished starting, not when this component was built. */
+    val readyAt: Instant?,
+    /** Seconds since it became ready. A small value means it has just cold-started. */
+    val uptimeSeconds: Long?,
 )
