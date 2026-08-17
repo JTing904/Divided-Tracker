@@ -96,7 +96,12 @@ fun PortfolioScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (state.isStale) {
-                item { StaleDataBanner(cachedAgo = state.cachedAt.describeAge(serverClock)) }
+                item {
+                    StaleDataBanner(
+                        cachedAgo = state.cachedAt.describeAge(serverClock),
+                        reason = state.staleError,
+                    )
+                }
             }
 
             item { PortfolioSummary(portfolio) }

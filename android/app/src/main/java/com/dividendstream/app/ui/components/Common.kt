@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
@@ -199,7 +200,23 @@ fun ErrorBanner(
  * may be behind rather than being shown stale numbers as if they were current.
  */
 @Composable
-fun StaleDataBanner(cachedAgo: String, modifier: Modifier = Modifier) {
+fun StaleDataBanner(
+    cachedAgo: String,
+    modifier: Modifier = Modifier,
+    /** Why it is stale. Null means the request that would refresh it is still running. */
+    reason: AppError? = null,
+) {
+    // Three different situations, and calling them all "offline" was how a waking server got
+    // blamed on the user's signal. The counter keeps running in every one of them, which is
+    // the reassurance worth repeating.
+    val message = when (reason?.code) {
+        null -> "Showing data saved $cachedAgo while we check for newer figures."
+        "SERVER_WAKING" ->
+            "The server is waking up - showing data saved $cachedAgo. The counter keeps running."
+        else ->
+            "Offline - showing data saved $cachedAgo. The counter keeps running from the last known figures."
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -208,14 +225,14 @@ fun StaleDataBanner(cachedAgo: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Default.CloudOff,
+            if (reason == null) Icons.Default.CloudSync else Icons.Default.CloudOff,
             contentDescription = null,
-            tint = DividendColors.Warning,
+            tint = if (reason == null) MaterialTheme.colorScheme.onSurfaceVariant else DividendColors.Warning,
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            "Offline - showing data saved $cachedAgo. The counter keeps running from the last known figures.",
+            message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

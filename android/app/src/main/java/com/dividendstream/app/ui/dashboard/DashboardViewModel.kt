@@ -25,6 +25,12 @@ data class DashboardUiState(
     val streams: List<AccumulationStream> = emptyList(),
     val isStale: Boolean = false,
     val cachedAt: Instant? = null,
+    /**
+     * Why the displayed copy is stale, once that is known. Null while the saved copy is on
+     * screen and the request that will replace it is still in flight -- "checking" and "the
+     * check failed" are different things to tell someone.
+     */
+    val staleError: AppError? = null,
     val error: AppError? = null,
     /** A newer published release, or null when there is nothing to tell the user. */
     val newerRelease: String? = null,
@@ -69,6 +75,25 @@ class DashboardViewModel(
      */
     fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
+            // Paint the saved copy before asking the server, not after giving up on it. The
+            // backend sleeps between uses and can take two minutes to wake, and there is no
+            // reason to stare at a spinner while the figures sit on the device -- they are
+            // derived from timestamps, so they are already counting and already correct.
+            if (_state.value.snapshot == null) {
+                dividendRepository.cachedLive()?.let { cached ->
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            snapshot = cached.value,
+                            streams = cached.value.streams.map { s -> s.toAccumulationStream() },
+                            isStale = true,
+                            cachedAt = cached.cachedAt,
+                            staleError = null,
+                        )
+                    }
+                }
+            }
+
             _state.update {
                 it.copy(isLoading = it.snapshot == null, isRefreshing = fromPull, error = null)
             }
@@ -82,12 +107,19 @@ class DashboardViewModel(
                         streams = result.data.value.streams.map { stream -> stream.toAccumulationStream() },
                         isStale = result.data.isStale,
                         cachedAt = result.data.cachedAt,
+                        staleError = result.data.staleError,
                         error = null,
                     )
                 }
 
+                // With a saved copy already on screen, the failure explains why it is stale
+                // rather than replacing the figures with an error the user cannot act on.
                 is AppResult.Failure -> _state.update {
-                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                    if (it.snapshot != null) {
+                        it.copy(isLoading = false, isRefreshing = false, staleError = result.error)
+                    } else {
+                        it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                    }
                 }
             }
         }

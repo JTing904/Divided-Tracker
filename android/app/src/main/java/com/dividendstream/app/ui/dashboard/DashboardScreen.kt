@@ -100,7 +100,12 @@ fun DashboardScreen(
             }
 
             if (state.isStale) {
-                item { StaleDataBanner(cachedAgo = state.cachedAt.describeAge(viewModel.serverClock)) }
+                item {
+                    StaleDataBanner(
+                        cachedAgo = state.cachedAt.describeAge(viewModel.serverClock),
+                        reason = state.staleError,
+                    )
+                }
             }
 
             item { LiveDividendCard(state, viewModel.serverClock) }

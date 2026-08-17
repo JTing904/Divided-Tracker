@@ -55,6 +55,23 @@ class DividendRepository(
             }
         }
 
+    /**
+     * The saved snapshot, read without touching the network.
+     *
+     * Exists so a screen can paint *before* the request rather than after it fails. The
+     * accumulating figure is derived from stored timestamps, so a saved copy is not a frozen
+     * screenshot -- it keeps counting, at the right rate, from the right value. Waiting for a
+     * sleeping server before showing any of that turns a cold start into a blank screen for
+     * two minutes, which is the whole reason this exists.
+     *
+     * Marked stale, because it is: the caller should say so and then go and check.
+     */
+    suspend fun cachedLive(): Cached<LiveDividendDto>? =
+        snapshotCache.readLive()?.let { cached ->
+            serverClock.restore(cached.clockOffsetMillis)
+            Cached(value = cached.value, isStale = true, cachedAt = cached.cachedAt)
+        }
+
     suspend fun upcoming(): AppResult<UpcomingDividendsDto> =
         apiCall(json) { api.upcomingDividends() }
             .also { if (it is AppResult.Success) serverClock.syncTo(it.data.serverTime) }

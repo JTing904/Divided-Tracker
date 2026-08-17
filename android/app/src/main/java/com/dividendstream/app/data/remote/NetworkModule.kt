@@ -13,6 +13,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
@@ -42,8 +43,11 @@ class NetworkModule(
         .client(
             OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
-                // No ColdStartInterceptor: refreshing is a POST, which it declines to retry.
-                .readTimeout(20, TimeUnit.SECONDS)
+                // No ColdStartInterceptor: refreshing is a POST, and a repeat would present a
+                // refresh token the first attempt may already have rotated away. It gets a
+                // long timeout instead, because it is the gate to every other call and a
+                // sleeping server must not be allowed to end the session.
+                .readTimeout(120, TimeUnit.SECONDS)
                 .build(),
         )
         .addConverterFactory(converterFactory)
@@ -160,13 +164,19 @@ private class TokenRefreshAuthenticator(
                 .build()
         }
 
-        val refreshed = runBlocking {
-            runCatching { refreshApi.refresh(RefreshRequest(session.refreshToken)) }.getOrNull()
+        val outcome = runBlocking {
+            runCatching { refreshApi.refresh(RefreshRequest(session.refreshToken)) }
         }
+        val refreshed = outcome.getOrNull()
 
         if (refreshed == null) {
-            // The refresh token is spent or revoked: the session is genuinely over.
-            runBlocking { sessionStore.clear() }
+            // Two very different failures used to land here together. Only the server saying
+            // no means the session is over; a timeout means the server was asleep, and signing
+            // someone out for that would end their session every time the host idled -- which
+            // on free hosting is every time they put the phone down.
+            val cause = outcome.exceptionOrNull()
+            val rejected = cause is HttpException && cause.code() in 400..499
+            if (rejected) runBlocking { sessionStore.clear() }
             return null
         }
 

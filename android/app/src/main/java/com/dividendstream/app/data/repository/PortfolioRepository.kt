@@ -48,6 +48,12 @@ class PortfolioRepository(
             }
         }
 
+    /** The saved portfolio, read without touching the network. See DividendRepository.cachedLive. */
+    suspend fun cachedPortfolio(): Cached<PortfolioDto>? =
+        snapshotCache.readPortfolio()?.let { cached ->
+            Cached(value = cached.value, isStale = true, cachedAt = cached.cachedAt)
+        }
+
     suspend fun searchStocks(query: String): AppResult<List<StockSummaryDto>> =
         apiCall(json) { api.searchStocks(query) }
 

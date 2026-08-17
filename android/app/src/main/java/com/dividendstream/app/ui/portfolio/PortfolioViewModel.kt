@@ -19,6 +19,8 @@ data class PortfolioUiState(
     val portfolio: PortfolioDto? = null,
     val isStale: Boolean = false,
     val cachedAt: Instant? = null,
+    /** Why the displayed copy is stale, once known. Null while the check is still running. */
+    val staleError: AppError? = null,
     val error: AppError? = null,
     val actionError: AppError? = null,
 ) {
@@ -37,6 +39,22 @@ class PortfolioViewModel(private val portfolioRepository: PortfolioRepository) :
     /** [fromPull] keeps the pull-to-refresh spinner turning over data already on screen. */
     fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
+            // Saved copy first: the server sleeps between uses, and holdings that were correct
+            // a minute ago are worth more than a spinner. See DividendRepository.cachedLive.
+            if (_state.value.portfolio == null) {
+                portfolioRepository.cachedPortfolio()?.let { cached ->
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            portfolio = cached.value,
+                            isStale = true,
+                            cachedAt = cached.cachedAt,
+                            staleError = null,
+                        )
+                    }
+                }
+            }
+
             _state.update {
                 it.copy(isLoading = it.portfolio == null, isRefreshing = fromPull, error = null)
             }
@@ -49,12 +67,17 @@ class PortfolioViewModel(private val portfolioRepository: PortfolioRepository) :
                         portfolio = result.data.value,
                         isStale = result.data.isStale,
                         cachedAt = result.data.cachedAt,
+                        staleError = result.data.staleError,
                         error = null,
                     )
                 }
 
                 is AppResult.Failure -> _state.update {
-                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                    if (it.portfolio != null) {
+                        it.copy(isLoading = false, isRefreshing = false, staleError = result.error)
+                    } else {
+                        it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                    }
                 }
             }
         }
