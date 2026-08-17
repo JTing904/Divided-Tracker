@@ -14,6 +14,7 @@ import okhttp3.Response
 import okhttp3.Route
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -41,6 +42,7 @@ class NetworkModule(
         .client(
             OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
+                // No ColdStartInterceptor: refreshing is a POST, which it declines to retry.
                 .readTimeout(20, TimeUnit.SECONDS)
                 .build(),
         )
@@ -51,6 +53,7 @@ class NetworkModule(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .addInterceptor(ColdStartInterceptor())
         .addInterceptor(BearerTokenInterceptor(sessionStore))
         .authenticator(TokenRefreshAuthenticator(sessionStore, refreshApi))
         .apply {
@@ -67,6 +70,51 @@ class NetworkModule(
         .addConverterFactory(converterFactory)
         .build()
         .create(DividendStreamApi::class.java)
+}
+
+/**
+ * Gives a sleeping server a second, more patient chance.
+ *
+ * Free hosting tiers stop the container after a spell of no traffic, so the request that
+ * wakes one waits for a whole application boot rather than for a database query. Twenty
+ * seconds is generous for a server already running and hopeless for one that is starting.
+ * Rather than make every request wait the worst case, the first timeout is read as a signal
+ * and the call repeated once on a longer budget.
+ *
+ * **Only idempotent methods are retried.** A POST that timed out may still have been received
+ * and acted on, and replaying "add this holding" would leave two. Those surface as
+ * [com.dividendstream.app.core.AppError.serverWaking] for the user to repeat deliberately --
+ * and by then the failed attempt has already started the container.
+ *
+ * This does not pretend to cover a cold start of any length; a boot slower than the budget
+ * below still fails. It fails having said something true, which is the part that matters.
+ */
+private class ColdStartInterceptor : Interceptor {
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+
+        return try {
+            chain.proceed(request)
+        } catch (timeout: InterruptedIOException) {
+            if (request.method !in IDEMPOTENT) throw timeout
+
+            chain.withReadTimeout(COLD_START_READ_SECONDS, TimeUnit.SECONDS)
+                .proceed(request)
+        }
+    }
+
+    private companion object {
+        val IDEMPOTENT = setOf("GET", "HEAD")
+
+        /**
+         * Long enough for a container to boot, short enough that a user staring at a spinner
+         * is told something before they give up. Measured against this project's own free-tier
+         * deployment, a boot from cold has run past three minutes, so this is deliberately not
+         * an attempt to outwait the worst case.
+         */
+        const val COLD_START_READ_SECONDS = 60
+    }
 }
 
 private class BearerTokenInterceptor(private val sessionStore: SessionStore) : Interceptor {

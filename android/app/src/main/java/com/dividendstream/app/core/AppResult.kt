@@ -20,6 +20,22 @@ data class AppError(
             message = "You are offline. Showing the last saved data.",
             isRetryable = true,
         )
+
+        /**
+         * The connection succeeded but the server did not answer in time.
+         *
+         * Kept apart from [offline] because they ask the user for different things. Offline
+         * means check your signal, and no amount of waiting will help. This means the server
+         * is almost certainly asleep -- free hosting tiers stop the container after a spell
+         * of no traffic -- and the only useful advice is to wait, which is advice we can only
+         * give if we do not call it something else.
+         */
+        val serverWaking = AppError(
+            code = "SERVER_WAKING",
+            message = "The server is waking up. This takes up to a couple of minutes after " +
+                "a period of no use, and only for the first request.",
+            isRetryable = true,
+        )
     }
 }
 

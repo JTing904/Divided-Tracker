@@ -5,6 +5,8 @@ import com.dividendstream.app.core.AppResult
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
 
 /**
  * Runs an API call and converts anything that goes wrong into a message worth showing.
@@ -16,8 +18,16 @@ suspend fun <T> apiCall(json: Json, block: suspend () -> T): AppResult<T> = try 
     AppResult.Success(block())
 } catch (ex: HttpException) {
     AppResult.Failure(ex.toAppError(json))
+} catch (ex: SocketTimeoutException) {
+    // Reached the host, got no answer in time. On free hosting that is a sleeping container
+    // rather than a broken connection, and telling the user they are offline sends them to
+    // check a network that is working fine.
+    AppResult.Failure(AppError.serverWaking)
+} catch (ex: InterruptedIOException) {
+    // OkHttp's whole-call timeout arrives as this rather than SocketTimeoutException.
+    AppResult.Failure(AppError.serverWaking)
 } catch (ex: IOException) {
-    // No connectivity, DNS failure, timeout, connection reset.
+    // No connectivity, DNS failure, connection reset.
     AppResult.Failure(AppError.offline)
 } catch (ex: Exception) {
     AppResult.Failure(

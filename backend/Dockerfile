@@ -34,7 +34,17 @@ EXPOSE 8080
 
 # Container-aware heap sizing. Without this the JVM sizes itself from the host's memory and
 # gets OOM-killed on a small free-tier instance.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+UseSerialGC"
+#
+# TieredStopAtLevel=1 caps JIT at the fast C1 compiler. Measured on this application's own
+# jar, booting the Spring context costs 28.4 CPU-seconds without it and 12.5 with -- more
+# than half the work of starting up is the C2 compiler optimising code. On a fraction-of-a-CPU
+# instance that CPU time is the wall-clock time, which is why a boot that takes 9 seconds on a
+# developer machine took 130 on the free tier.
+#
+# The trade is lower peak throughput, and here it is barely a trade: C2's optimisations only
+# pay back over sustained load, and a free instance is stopped again after a quarter-hour of
+# quiet. It never gets to collect.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 
 # Required, and deliberately not defaulted: JwtService refuses to start without JWT_SECRET
 # outside the local profiles, so a misconfigured deploy fails loudly instead of signing
