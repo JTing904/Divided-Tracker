@@ -1,8 +1,10 @@
 package com.dividendstream.api.auth
 
 import com.dividendstream.api.common.ConflictException
+import com.dividendstream.api.common.ForbiddenException
 import com.dividendstream.api.common.UnauthorizedException
 import com.dividendstream.api.config.JwtProperties
+import com.dividendstream.api.config.RegistrationProperties
 import com.dividendstream.api.security.JwtService
 import com.dividendstream.api.user.UserEntity
 import com.dividendstream.api.user.UserRepository
@@ -25,12 +27,15 @@ class AuthService(
     private val jwtService: JwtService,
     private val jwtProperties: JwtProperties,
     private val clock: Clock,
+    private val registrationProperties: RegistrationProperties,
 ) {
 
     private val secureRandom = SecureRandom()
 
     @Transactional
     fun register(request: RegisterRequest): AuthResponse {
+        requireValidInviteCode(request.inviteCode)
+
         val email = request.email.trim().lowercase()
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw ConflictException("EMAIL_ALREADY_REGISTERED", "That email is already registered.")
@@ -44,6 +49,27 @@ class AuthService(
             ),
         )
         return issueSession(user)
+    }
+
+    /**
+     * Compared with a constant-time equality check. A naive comparison leaks the code one
+     * character at a time to anyone able to measure response times.
+     */
+    private fun requireValidInviteCode(supplied: String?) {
+        val expected = registrationProperties.inviteCode.trim()
+        if (expected.isEmpty()) return
+
+        val given = supplied?.trim().orEmpty()
+        val matches = MessageDigest.isEqual(
+            given.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8),
+        )
+        if (!matches) {
+            throw ForbiddenException(
+                message = "That invite code is not valid. Ask whoever shared this app for one.",
+                code = "INVALID_INVITE_CODE",
+            )
+        }
     }
 
     @Transactional

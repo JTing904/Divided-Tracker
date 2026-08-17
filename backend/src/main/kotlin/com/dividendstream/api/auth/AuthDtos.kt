@@ -19,6 +19,10 @@ data class RegisterRequest(
     @field:NotBlank(message = "Password is required")
     @field:Size(min = 8, max = 100, message = "Password must be at least 8 characters")
     val password: String,
+
+    /** Required only when the server is configured with an invite code. */
+    @field:Size(max = 100, message = "Invite code is too long")
+    val inviteCode: String? = null,
 )
 
 data class LoginRequest(

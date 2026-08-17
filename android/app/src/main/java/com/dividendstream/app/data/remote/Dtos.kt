@@ -24,7 +24,13 @@ data class ApiErrorDto(
 // --- auth --------------------------------------------------------------------
 
 @Serializable
-data class RegisterRequest(val name: String, val email: String, val password: String)
+data class RegisterRequest(
+    val name: String,
+    val email: String,
+    val password: String,
+    /** Only required when the server is configured to require one. */
+    val inviteCode: String? = null,
+)
 
 @Serializable
 data class LoginRequest(val email: String, val password: String)

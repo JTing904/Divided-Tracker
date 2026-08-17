@@ -43,6 +43,18 @@ data class YahooProperties(
     val requestTimeout: Duration = Duration.ofSeconds(10),
 )
 
+@ConfigurationProperties(prefix = "dividend-stream.registration")
+data class RegistrationProperties(
+    /**
+     * When set, a matching code must accompany every registration.
+     *
+     * This exists to stop an open endpoint from being scripted: the storage one account uses
+     * is trivial, but every request wakes the database, and a registration loop would burn a
+     * month of free-tier compute in an afternoon. Blank leaves registration open.
+     */
+    val inviteCode: String = "",
+)
+
 @ConfigurationProperties(prefix = "dividend-stream.rate-limit")
 data class RateLimitProperties(
     val authRequestsPerMinute: Int = 20,

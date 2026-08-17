@@ -24,8 +24,23 @@ class AuthRepository(
 
     suspend fun restoreSession(): Session? = sessionStore.load()
 
-    suspend fun register(name: String, email: String, password: String): AppResult<Session> =
-        apiCall(json) { api.register(RegisterRequest(name.trim(), email.trim(), password)) }
+    suspend fun register(
+        name: String,
+        email: String,
+        password: String,
+        inviteCode: String,
+    ): AppResult<Session> =
+        apiCall(json) {
+            api.register(
+                RegisterRequest(
+                    name = name.trim(),
+                    email = email.trim(),
+                    password = password,
+                    // Sent as null when empty, so an open server sees no difference.
+                    inviteCode = inviteCode.trim().takeIf { it.isNotEmpty() },
+                ),
+            )
+        }
             .also { it.persistOnSuccess() }
             .map { it.toSession() }
 

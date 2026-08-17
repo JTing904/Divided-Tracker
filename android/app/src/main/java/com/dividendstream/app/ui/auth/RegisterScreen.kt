@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.PersonOutline
@@ -115,10 +116,29 @@ fun RegisterScreen(
                 placeholder = "Repeat your password",
                 leadingIcon = Icons.Default.LockReset,
                 keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Done,
                 isPassword = true,
                 isError = state.passwordMismatch,
                 supportingText = if (state.passwordMismatch) "Passwords do not match" else null,
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // Always shown, always optional here: whether one is actually needed is the
+            // server's decision, and asking the app to discover that first would mean an
+            // extra round trip before the form could even be drawn.
+            DsTextField(
+                label = "Invite code",
+                value = state.inviteCode,
+                onValueChange = viewModel::onInviteCodeChange,
+                placeholder = "Only if you were given one",
+                leadingIcon = Icons.Default.ConfirmationNumber,
+                imeAction = ImeAction.Done,
+                isError = state.error?.code == "INVALID_INVITE_CODE",
+                supportingText = if (state.error?.code == "INVALID_INVITE_CODE") {
+                    state.error?.message
+                } else {
+                    null
+                },
             )
 
             state.error?.takeIf { it.fieldErrors.isEmpty() }?.let { error ->

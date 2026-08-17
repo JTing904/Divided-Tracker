@@ -71,6 +71,9 @@ dividend-stream:
   market-data:
     provider: ${MARKET_DATA_PROVIDER:mock}
     quote-cache-ttl: PT5M
+  registration:
+    # Blank leaves registration open. Set INVITE_CODE to require one.
+    invite-code: ${INVITE_CODE:}
   rate-limit:
     auth-requests-per-minute: ${AUTH_RATE_LIMIT:20}
   dividends:

@@ -48,6 +48,8 @@ data class RegisterUiState(
     val email: String = "",
     val password: String = "",
     val confirmPassword: String = "",
+    /** Blank unless the server asks for one; the server decides, not the app. */
+    val inviteCode: String = "",
     val isSubmitting: Boolean = false,
     val error: AppError? = null,
 ) {
@@ -83,13 +85,17 @@ class RegisterViewModel(private val authRepository: AuthRepository) : ViewModel(
 
     fun onConfirmPasswordChange(value: String) = _state.update { it.copy(confirmPassword = value, error = null) }
 
+    fun onInviteCodeChange(value: String) = _state.update { it.copy(inviteCode = value, error = null) }
+
     fun submit() {
         val current = _state.value
         if (!current.canSubmit) return
 
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true, error = null) }
-            val result = authRepository.register(current.name, current.email, current.password)
+            val result = authRepository.register(
+                current.name, current.email, current.password, current.inviteCode,
+            )
             when (result) {
                 is AppResult.Success -> _state.update { it.copy(isSubmitting = false) }
                 is AppResult.Failure -> _state.update { it.copy(isSubmitting = false, error = result.error) }

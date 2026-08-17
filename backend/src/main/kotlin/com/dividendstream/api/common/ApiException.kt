@@ -24,8 +24,10 @@ class InvalidRequestException(message: String, code: String = "INVALID_REQUEST")
 class UnauthorizedException(message: String, code: String = "UNAUTHORIZED") :
     ApiException(HttpStatus.UNAUTHORIZED, code, message)
 
-class ForbiddenException(message: String = "You do not have access to this resource.") :
-    ApiException(HttpStatus.FORBIDDEN, "FORBIDDEN", message)
+class ForbiddenException(
+    message: String = "You do not have access to this resource.",
+    code: String = "FORBIDDEN",
+) : ApiException(HttpStatus.FORBIDDEN, code, message)
 
 class UpstreamUnavailableException(message: String = "Market data is temporarily unavailable.") :
     ApiException(HttpStatus.SERVICE_UNAVAILABLE, "UPSTREAM_UNAVAILABLE", message)
