@@ -5,6 +5,10 @@ rem
 rem Output: dist\DividendStream\Dividend Stream.exe
 setlocal
 
+rem Must match packageVersion in desktop\build.gradle.kts, which names the .msi jpackage
+rem produces. Keeping it in one place here means a bump touches two files, not four.
+set "APP_VERSION=1.0.1"
+
 title Dividend Stream - build desktop app
 
 call :find_build_jdk
@@ -47,7 +51,7 @@ if errorlevel 1 (
 )
 
 set "IMAGE=%~dp0desktop\build\compose\binaries\main\app\Dividend Stream"
-set "MSI=%~dp0desktop\build\compose\binaries\main\msi\Dividend Stream-1.0.0.msi"
+set "MSI=%~dp0desktop\build\compose\binaries\main\msi\Dividend Stream-%APP_VERSION%.msi"
 
 if not exist "%IMAGE%\Dividend Stream.exe" (
     echo.
@@ -61,14 +65,14 @@ if not exist "%~dp0dist" mkdir "%~dp0dist"
 
 if exist "%MSI%" (
     echo   Copying the installer to dist ...
-    copy /y "%MSI%" "%~dp0dist\DividendStream-1.0.0-installer.msi" >nul
+    copy /y "%MSI%" "%~dp0dist\DividendStream-%APP_VERSION%-installer.msi" >nul
 ) else (
     echo   No .msi was produced; the portable folder below still works.
 )
 
 echo.
 echo   Done.
-echo     Installer: %~dp0dist\DividendStream-1.0.0-installer.msi
+echo     Installer: %~dp0dist\DividendStream-%APP_VERSION%-installer.msi
 echo     Portable : %IMAGE%\Dividend Stream.exe
 echo.
 echo   Install the .msi for a Start Menu entry, or copy the portable folder anywhere -
