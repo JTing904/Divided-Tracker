@@ -241,6 +241,22 @@ data class DividendHistoryDto(
     val byStock: List<StockDividendTotalDto> = emptyList(),
 )
 
+// --- app version -------------------------------------------------------------
+
+/**
+ * Nulls mean "the backend has no opinion", which is not the same as "you are up to date".
+ * Defaulted so an older client can still read a response from a newer backend.
+ */
+@Serializable
+data class AppVersionDto(
+    val service: String = "",
+    val commit: String? = null,
+    val latestClient: String? = null,
+    val minimumClient: String? = null,
+    val startedAt: Instant? = null,
+    val uptimeSeconds: Long = 0,
+)
+
 // --- mapping into the calculator's input -------------------------------------
 
 fun LiveStreamDto.toAccumulationStream() = AccumulationStream(

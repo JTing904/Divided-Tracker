@@ -39,7 +39,13 @@ object AppViewModelProvider {
         initializer { SessionViewModel(container.authRepository) }
         initializer { LoginViewModel(container.authRepository) }
         initializer { RegisterViewModel(container.authRepository) }
-        initializer { DashboardViewModel(container.dividendRepository, container.serverClock) }
+        initializer {
+            DashboardViewModel(
+                container.dividendRepository,
+                container.appInfoRepository,
+                container.serverClock,
+            )
+        }
         initializer { PortfolioViewModel(container.portfolioRepository) }
         initializer { AddStockViewModel(container.portfolioRepository) }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }

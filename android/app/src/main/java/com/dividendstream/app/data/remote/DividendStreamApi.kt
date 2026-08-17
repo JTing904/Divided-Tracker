@@ -58,4 +58,11 @@ interface DividendStreamApi {
 
     @GET("api/dividends/{id}")
     suspend fun dividendDetail(@Path("id") id: String): DividendDto
+
+    /**
+     * Which build is serving, and which client release is current. Needs no session, and
+     * touches no database -- so it answers even when the rest of the API cannot.
+     */
+    @GET("api/app/version")
+    suspend fun appVersion(): AppVersionDto
 }

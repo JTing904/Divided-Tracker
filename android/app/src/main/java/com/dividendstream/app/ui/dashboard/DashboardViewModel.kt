@@ -7,6 +7,7 @@ import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.toAccumulationStream
+import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.domain.AccumulationStream
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,12 +26,15 @@ data class DashboardUiState(
     val isStale: Boolean = false,
     val cachedAt: Instant? = null,
     val error: AppError? = null,
+    /** A newer published release, or null when there is nothing to tell the user. */
+    val newerRelease: String? = null,
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
 
 class DashboardViewModel(
     private val dividendRepository: DividendRepository,
+    private val appInfoRepository: AppInfoRepository,
     val serverClock: ServerClock,
 ) : ViewModel() {
 
@@ -39,7 +43,21 @@ class DashboardViewModel(
 
     init {
         refresh()
+        checkForUpdate()
     }
+
+    /**
+     * Asked once per launch, and never surfaced as an error. An update notice is the least
+     * urgent thing on the screen, so if the backend cannot answer, the user hears nothing.
+     */
+    private fun checkForUpdate() {
+        viewModelScope.launch {
+            val newer = runCatching { appInfoRepository.newerRelease() }.getOrNull() ?: return@launch
+            _state.update { it.copy(newerRelease = newer) }
+        }
+    }
+
+    fun dismissUpdateNotice() = _state.update { it.copy(newerRelease = null) }
 
     /**
      * Pulls a fresh snapshot. Cheap on the backend -- a single read, no writes -- because the

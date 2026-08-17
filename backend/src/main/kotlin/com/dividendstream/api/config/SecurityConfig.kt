@@ -43,7 +43,9 @@ class SecurityConfig(
             .authorizeHttpRequests { auth ->
                 auth
                     .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
-                    .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                    // A client must be able to learn it is too old to be let in before it has
+                    // a session, since being shut out is precisely when it needs to say why.
+                    .requestMatchers(HttpMethod.GET, "/api/app/version").permitAll()
                     .anyRequest().authenticated()
             }
             .exceptionHandling { handling ->

@@ -19,6 +19,14 @@ object BuildConfig {
     val API_BASE_URL: String get() = DesktopSettings.backendUrl
 
     val DEBUG: Boolean = System.getProperty("dividendstream.debug") == "true"
+
+    /**
+     * Mirrors Android's generated BuildConfig field so the shared code can ask either client
+     * the same question. Set from the Gradle project version in desktop/build.gradle.kts; a
+     * blank fallback rather than a made-up number, because AppVersion treats anything it
+     * cannot parse as "do not nag".
+     */
+    val VERSION_NAME: String = System.getProperty("dividendstream.version").orEmpty()
 }
 
 /**

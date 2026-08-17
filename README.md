@@ -241,6 +241,7 @@ provider by implementing the interface and setting `MARKET_DATA_PROVIDER`.
 | `GET`/`POST /api/portfolio`, `PUT`/`DELETE /api/portfolio/{id}` | |
 | `GET /api/dividends/live` | live snapshot + accumulation parameters |
 | `GET /api/dividends/upcoming` · `history` · `{id}` | |
+| `GET /api/app/version` | running build, current client release; unauthenticated, no database |
 
 Every user-scoped query is filtered by the user id in the JWT, never by a path parameter, so
 a guessed id resolves to nothing.

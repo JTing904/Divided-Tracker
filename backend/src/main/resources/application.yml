@@ -76,6 +76,15 @@ dividend-stream:
     invite-code: ${INVITE_CODE:}
   rate-limit:
     auth-requests-per-minute: ${AUTH_RATE_LIMIT:20}
+  release:
+    # Set LATEST_CLIENT to the version you just published, so clients can tell they are
+    # behind. Left blank, /api/app/version reports null and no client is nagged.
+    latest-client: ${LATEST_CLIENT:}
+    # Only set MINIMUM_CLIENT for a change older clients genuinely cannot survive: it locks
+    # them out of their own data until they update.
+    minimum-client: ${MINIMUM_CLIENT:}
+    # Render publishes the deployed SHA under this name. Other hosts use their own.
+    commit: ${RENDER_GIT_COMMIT:}
   dividends:
     backfill-settled-cycles: ${DIVIDEND_BACKFILL:true}
     backfill-window-days: 400

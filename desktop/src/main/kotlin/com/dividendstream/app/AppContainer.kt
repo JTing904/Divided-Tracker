@@ -4,6 +4,7 @@ import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.local.SessionStore
 import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.NetworkModule
+import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
@@ -31,4 +32,5 @@ class AppContainer {
     val authRepository = AuthRepository(network.api, sessionStore, snapshotCache, network.json)
     val portfolioRepository = PortfolioRepository(network.api, snapshotCache, network.json)
     val dividendRepository = DividendRepository(network.api, snapshotCache, serverClock, network.json)
+    val appInfoRepository = AppInfoRepository(network.api, network.json, BuildConfig.VERSION_NAME)
 }

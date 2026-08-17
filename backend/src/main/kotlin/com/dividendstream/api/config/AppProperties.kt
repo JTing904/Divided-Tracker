@@ -59,3 +59,30 @@ data class RegistrationProperties(
 data class RateLimitProperties(
     val authRequestsPerMinute: Int = 20,
 )
+
+@ConfigurationProperties(prefix = "dividend-stream.release")
+data class ReleaseProperties(
+    /**
+     * The newest client release available to download.
+     *
+     * Configured rather than derived, because the backend cannot know what has been published:
+     * a client release exists on GitHub, on its own schedule, and this is the operator saying
+     * so. Blank means "no opinion", and a client that asks is told nothing rather than being
+     * told it is up to date -- a silence a client can distinguish from an answer.
+     */
+    val latestClient: String = "",
+
+    /**
+     * The oldest client release still able to talk to this backend.
+     *
+     * Only raise this for a change a client genuinely cannot survive, because raising it locks
+     * anyone below it out of their own portfolio until they update.
+     */
+    val minimumClient: String = "",
+
+    /**
+     * Identifies the running build. Render exposes the deployed SHA as RENDER_GIT_COMMIT; other
+     * hosts have their own name for it, and locally there is none.
+     */
+    val commit: String = "",
+)

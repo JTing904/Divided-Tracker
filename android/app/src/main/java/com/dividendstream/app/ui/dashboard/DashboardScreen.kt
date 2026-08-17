@@ -55,6 +55,7 @@ import com.dividendstream.app.ui.components.SectionHeader
 import com.dividendstream.app.ui.components.StaleDataBanner
 import com.dividendstream.app.ui.components.StatTile
 import com.dividendstream.app.ui.components.StatusPill
+import com.dividendstream.app.ui.components.UpdateAvailableBanner
 import com.dividendstream.app.ui.components.rememberAccruedAmount
 import com.dividendstream.app.ui.components.rememberSecondTicker
 import com.dividendstream.app.ui.theme.DividendColors
@@ -88,6 +89,15 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item { GreetingHeader(userName, snapshot) }
+
+            state.newerRelease?.let { version ->
+                item {
+                    UpdateAvailableBanner(
+                        version = version,
+                        onDismiss = viewModel::dismissUpdateNotice,
+                    )
+                }
+            }
 
             if (state.isStale) {
                 item { StaleDataBanner(cachedAgo = state.cachedAt.describeAge(viewModel.serverClock)) }

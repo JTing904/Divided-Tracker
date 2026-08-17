@@ -92,6 +92,10 @@ compose.desktop {
     application {
         mainClass = "com.dividendstream.desktop.MainKt"
 
+        // So the running app can report its own version without a third place to bump it.
+        // Applies to `run` and to the packaged binary alike.
+        jvmArgs += "-Ddividendstream.version=$version"
+
         // jlink and jpackage come from the JDK named here. The JetBrains runtime bundled with
         // Android Studio builds the code fine but ships no jpackage, so packaging is pointed
         // at a full JDK via -Pdividendstream.jpackage.home (see package-desktop.cmd).
