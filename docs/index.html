@@ -3,259 +3,346 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dividend Stream</title>
-<meta name="description" content="Watch your expected dividends accumulate, second by second.">
+<title>Dividend Stream — watch your dividends accumulate</title>
+<meta name="description" content="Turns an expected stock dividend into a live figure you can watch grow, second by second.">
+<meta property="og:title" content="Dividend Stream">
+<meta property="og:description" content="Watch your dividends accumulate, second by second.">
 <style>
-  :root {
-    --canvas: #0a0a0a;
-    --surface: #161616;
-    --surface-2: #1e1e1e;
-    --outline: #2a2a2a;
-    --growth: #34d97b;
-    --growth-bright: #4ae88c;
-    --text: #f2f2f2;
-    --muted: #8a8a8a;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--canvas);
-    color: var(--text);
-    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
-  h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; }
-  a { color: var(--growth); }
+:root{
+  --canvas:#070809;
+  --surface:#101214;
+  --surface-2:#16191c;
+  --line:#22262a;
+  --line-soft:#1a1d21;
+  --green:#34d97b;
+  --green-hi:#5ef39b;
+  --green-dim:#1c6b41;
+  --text:#eef1f2;
+  --muted:#7e878d;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--canvas);color:var(--text);
+  font:16px/1.65 var(--sans);-webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+/* A faint film of noise. Flat dark backgrounds band on cheap panels and read as
+   "unfinished"; this is the single cheapest thing that makes dark UI look considered. */
+body::before{
+  content:"";position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.wrap{max-width:1000px;margin:0 auto;padding:0 28px;position:relative;z-index:2}
+a{color:var(--green);text-decoration:none}
+h1,h2,h3{line-height:1.08;letter-spacing:-.03em;margin:0}
 
-  /* ---- hero ---- */
-  header { padding: 88px 0 64px; text-align: center; }
-  .brand {
-    font: 600 13px/1 var(--mono);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--growth);
-    margin-bottom: 28px;
-  }
-  h1 { font-size: clamp(30px, 5.5vw, 48px); margin: 0 0 16px; }
-  .lede { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); margin: 0 auto; max-width: 30em; }
+/* ── nav ─────────────────────────────────────────────── */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:50;
+  padding:16px 0;
+  background:rgba(7,8,9,0);
+  backdrop-filter:blur(0px);
+  border-bottom:1px solid transparent;
+  transition:background .4s var(--ease),backdrop-filter .4s var(--ease),border-color .4s var(--ease);
+}
+nav.stuck{background:rgba(7,8,9,.72);backdrop-filter:blur(14px);border-bottom-color:var(--line-soft)}
+nav .wrap{display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:10px;font:600 14px/1 var(--sans);letter-spacing:-.01em}
+.spark{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);animation:breathe 2.6s var(--ease) infinite}
+@keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+.nav-cta{font-size:13.5px;color:var(--muted);transition:color .25s}
+.nav-cta:hover{color:var(--text)}
 
-  /* ---- the counter ---- */
-  .counter-card {
-    margin: 48px 0 12px;
-    padding: 36px 24px 30px;
-    background: var(--surface);
-    border: 1px solid var(--outline);
-    border-radius: 18px;
-  }
-  .counter-label {
-    font: 500 11px/1 var(--mono);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--growth);
-    margin-bottom: 18px;
-  }
-  .counter-label::before {
-    content: "●";
-    margin-right: 8px;
-    animation: pulse 2s ease-in-out infinite;
-    display: inline-block;
-  }
-  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
-  .amount {
-    font: 700 clamp(34px, 8vw, 60px)/1 var(--mono);
-    color: var(--growth);
-    letter-spacing: -0.02em;
-    /* Tabular figures stop the number jittering as digits change width. */
-    font-variant-numeric: tabular-nums;
-  }
-  .amount .cur { font-size: 0.42em; color: var(--growth); margin-right: 0.25em; vertical-align: 0.32em; }
-  .amount .tail { color: #1f7a48; }
-  .rate { margin-top: 14px; font: 13px/1 var(--mono); color: var(--muted); }
-  .demo-note { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+/* ── hero ────────────────────────────────────────────── */
+header{position:relative;padding:180px 0 110px;text-align:center;overflow:hidden}
+/* One large, very soft radial. Depth without a single gradient banner in sight. */
+.glow{
+  position:absolute;left:50%;top:-10%;width:1100px;height:620px;
+  transform:translateX(-50%);pointer-events:none;
+  background:radial-gradient(50% 50% at 50% 50%,rgba(52,217,123,.16) 0%,rgba(52,217,123,.05) 42%,transparent 70%);
+  filter:blur(12px);
+}
+.eyebrow{
+  display:inline-block;font:500 11px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--green);padding:8px 16px;border:1px solid rgba(52,217,123,.24);border-radius:100px;
+  background:rgba(52,217,123,.05);margin-bottom:34px;
+}
+h1{font-size:clamp(38px,7.2vw,74px);font-weight:650;margin-bottom:22px}
+h1 .fade{color:var(--muted)}
+.lede{font-size:clamp(17px,2.1vw,20px);color:var(--muted);max-width:30em;margin:0 auto}
 
-  /* ---- downloads ---- */
-  .downloads { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 36px 0 10px; }
-  .btn {
-    display: inline-flex; flex-direction: column; gap: 2px;
-    padding: 14px 26px; border-radius: 12px;
-    text-decoration: none; border: 1px solid var(--outline);
-    background: var(--surface-2); color: var(--text);
-    transition: border-color .15s, transform .15s;
-  }
-  .btn:hover { border-color: var(--growth); transform: translateY(-1px); }
-  .btn.primary { background: var(--growth); color: #04240f; border-color: var(--growth); }
-  .btn.primary:hover { background: var(--growth-bright); }
-  .btn strong { font-size: 15px; }
-  .btn span { font: 11px/1.4 var(--mono); opacity: .72; }
+/* ── counter ─────────────────────────────────────────── */
+.stage{
+  margin:60px auto 0;max-width:640px;padding:42px 28px 34px;
+  background:linear-gradient(180deg,var(--surface) 0%,#0c0e10 100%);
+  border:1px solid var(--line);border-radius:22px;
+  box-shadow:0 40px 80px -40px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.03);
+}
+.stage-label{display:flex;align-items:center;justify-content:center;gap:9px;font:500 10.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--green);margin-bottom:22px}
+.figure{font:700 clamp(38px,9vw,68px)/1 var(--mono);letter-spacing:-.035em;font-variant-numeric:tabular-nums;color:var(--green);text-shadow:0 0 44px rgba(52,217,123,.35)}
+.figure .cur{font-size:.38em;vertical-align:.42em;margin-right:.22em;opacity:.85}
+.figure .tail{color:var(--green-dim);text-shadow:none}
+.rate{margin-top:16px;font:12.5px/1 var(--mono);color:var(--muted);letter-spacing:.02em}
+.caption{margin:14px 0 0;font-size:12.5px;color:#5c6469}
 
-  /* ---- sections ---- */
-  section { padding: 56px 0; border-top: 1px solid var(--outline); }
-  h2 { font-size: clamp(22px, 3.4vw, 28px); margin: 0 0 10px; }
-  .sub { color: var(--muted); margin: 0 0 28px; }
-  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .card { padding: 22px; background: var(--surface); border: 1px solid var(--outline); border-radius: 14px; }
-  .card h3 { font-size: 16px; margin: 0 0 8px; }
-  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* ── buttons ─────────────────────────────────────────── */
+.cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin:46px 0 16px}
+.btn{
+  display:inline-flex;flex-direction:column;gap:3px;padding:15px 30px;border-radius:13px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text);
+  transition:transform .3s var(--ease),border-color .3s var(--ease),box-shadow .3s var(--ease);
+  position:relative;overflow:hidden;
+}
+.btn strong{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.btn span{font:11px/1.4 var(--mono);opacity:.6}
+.btn:hover{transform:translateY(-2px);border-color:#33393e;box-shadow:0 18px 36px -20px rgba(0,0,0,.9)}
+.btn.primary{background:var(--green);color:#052312;border-color:var(--green)}
+.btn.primary span{opacity:.72}
+.btn.primary:hover{background:var(--green-hi);box-shadow:0 20px 46px -18px rgba(52,217,123,.5)}
+/* A slow sheen, once, on hover. Deliberately almost invisible. */
+.btn.primary::after{
+  content:"";position:absolute;inset:0;transform:translateX(-120%);
+  background:linear-gradient(100deg,transparent 40%,rgba(255,255,255,.28) 50%,transparent 60%);
+}
+.btn.primary:hover::after{transform:translateX(120%);transition:transform .9s var(--ease)}
 
-  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--outline); }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-  td.k { font-family: var(--mono); font-size: 13px; }
-  .yes { color: var(--growth); }
-  .no { color: #d97a7a; }
+/* ── reveal ──────────────────────────────────────────── */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .85s var(--ease),transform .85s var(--ease)}
+.rv.in{opacity:1;transform:none}
 
-  .callout {
-    padding: 18px 22px; border-radius: 12px;
-    background: rgba(217, 122, 122, .07);
-    border: 1px solid rgba(217, 122, 122, .28);
-    font-size: 14.5px;
-  }
-  .callout strong { color: #e5a0a0; }
+/* ── sections ────────────────────────────────────────── */
+section{padding:104px 0;border-top:1px solid var(--line-soft)}
+.kicker{font:500 10.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--green);margin-bottom:18px}
+h2{font-size:clamp(26px,4vw,40px);font-weight:640;margin-bottom:14px}
+.sub{color:var(--muted);max-width:34em;font-size:17px;margin:0 0 46px}
 
-  footer { padding: 44px 0 64px; color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--outline); }
-  code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); padding: 2px 6px; border-radius: 5px; }
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);border-radius:16px;overflow:hidden}
+.metric{background:var(--canvas);padding:28px 22px}
+.metric b{display:block;font:700 30px/1 var(--mono);color:var(--green);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.metric span{display:block;margin-top:9px;font-size:13px;color:var(--muted)}
+
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(252px,1fr))}
+.card{
+  padding:28px;background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;
+  transition:border-color .4s var(--ease),transform .4s var(--ease);
+}
+.card:hover{border-color:#2c3237;transform:translateY(-3px)}
+.card h3{font-size:16.5px;font-weight:600;margin-bottom:10px}
+.card p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.62}
+.card .num{font:600 11px/1 var(--mono);color:var(--green);opacity:.55;margin-bottom:16px;display:block}
+
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{text-align:left;padding:15px 10px;border-bottom:1px solid var(--line-soft)}
+th{color:var(--muted);font:500 10.5px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase}
+td.k{font-family:var(--mono);font-size:13.5px}
+.tag{font:500 10.5px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;padding:5px 10px;border-radius:6px;white-space:nowrap}
+.tag.real{color:var(--green);background:rgba(52,217,123,.1)}
+.tag.est{color:#d9a34a;background:rgba(217,163,74,.1)}
+.tag.none{color:#8b9196;background:rgba(139,145,150,.09)}
+
+.note{padding:26px 30px;border-radius:16px;background:var(--surface);border:1px solid var(--line-soft);border-left:2px solid #d9a34a}
+.note p{margin:0 0 11px;font-size:14.5px;color:var(--muted)}
+.note p:last-child{margin:0}
+.note strong{color:var(--text);font-weight:600}
+
+footer{padding:70px 0 88px;border-top:1px solid var(--line-soft);color:#5c6469;font-size:13.5px}
+footer .row{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:center;justify-content:space-between}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:2.5px 7px;border-radius:5px;color:#c9d1d4}
+
+/* Motion is decoration here; anyone who has asked for less should get a static page. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .rv{opacity:1;transform:none}
+  html{scroll-behavior:auto}
+}
 </style>
 </head>
 <body>
 
-<div class="wrap">
+<nav id="nav"><div class="wrap">
+  <div class="logo"><span class="spark"></span>Dividend Stream</div>
+  <a class="nav-cta" href="#get">Download</a>
+</div></nav>
 
-  <header>
-    <div class="brand">Dividend Stream</div>
-    <h1>Your dividends, accumulating<br>second by second.</h1>
-    <p class="lede">
-      Most portfolio apps show you a number that sits still until payday.
-      This one shows the money arriving.
+<header>
+  <div class="glow"></div>
+  <div class="wrap">
+    <div class="eyebrow rv">Bursa Malaysia · Free</div>
+    <h1 class="rv">Your dividends,<br><span class="fade">arriving in real time.</span></h1>
+    <p class="lede rv">
+      Most portfolio apps show a number that sits still until payday.
+      This one shows the money moving.
     </p>
 
-    <div class="counter-card">
-      <div class="counter-label">Live dividend</div>
-      <div class="amount"><span class="cur">RM</span><span id="head">0.00</span><span class="tail" id="tail">0000</span></div>
-      <div class="rate" id="rate">Rate: RM0.00002035 / sec</div>
+    <div class="stage rv">
+      <div class="stage-label"><span class="spark"></span>Live dividend</div>
+      <div class="figure"><span class="cur">RM</span><span id="head">0.00</span><span class="tail" id="tail">0000</span></div>
+      <div class="rate">RM0.00002035 per second · RM320.00 expected</div>
+      <p class="caption">A demonstration. The app computes this from your own holdings.</p>
     </div>
-    <p class="demo-note">A demonstration on this page. The app computes the same figure from your own holdings.</p>
 
-    <div class="downloads">
-      <a class="btn primary" id="dl-win" href="https://github.com/JTing904/Divided-Tracker/releases/latest">
-        <strong>Download for Windows</strong>
-        <span>.msi installer · includes everything</span>
+    <div class="cta rv" id="get">
+      <a class="btn primary" href="https://github.com/JTing904/Divided-Tracker/releases/latest">
+        <strong>Download for Windows</strong><span>.msi · runtime included</span>
       </a>
-      <a class="btn" id="dl-apk" href="https://github.com/JTing904/Divided-Tracker/releases/latest">
-        <strong>Download for Android</strong>
-        <span>.apk · sideload</span>
+      <a class="btn" href="https://github.com/JTing904/Divided-Tracker/releases/latest">
+        <strong>Download for Android</strong><span>.apk · sideload</span>
       </a>
     </div>
-    <p class="demo-note">Free and open source. <a href="https://github.com/JTing904/Divided-Tracker">Source on GitHub</a></p>
-  </header>
+    <p class="caption rv">Open source · <a href="https://github.com/JTing904/Divided-Tracker">View on GitHub</a></p>
+  </div>
+</header>
 
-  <section>
-    <h2>How it works</h2>
-    <p class="sub">The interesting part is what the app <em>doesn't</em> do.</p>
-    <div class="grid">
-      <div class="card">
-        <h3>Nothing ticks</h3>
-        <p>The database is never written to on a timer. Each dividend stores the parameters of a straight line — amount, window, rate — and the figure is recomputed from the clock every frame.</p>
-      </div>
-      <div class="card">
-        <h3>Close it for a week</h3>
-        <p>Reopen and it shows the right number. Nothing is being counted, so there is no count to lose.</p>
-      </div>
-      <div class="card">
-        <h3>Works offline</h3>
-        <p>Your device already has the parameters. It doesn't need the server to keep counting.</p>
-      </div>
-      <div class="card">
-        <h3>Never floating point</h3>
-        <p>Money is <code>BigDecimal</code> end to end, and crosses the network as text — a JSON number would be parsed into a double and quietly destroy a per-second rate.</p>
-      </div>
+<section>
+  <div class="wrap">
+    <div class="kicker rv">By the numbers</div>
+    <h2 class="rv">Built to be exact.</h2>
+    <p class="sub rv">Money is the one thing a rounding error is never forgivable in.</p>
+    <div class="metrics rv">
+      <div class="metric"><b data-to="12">0</b><span>decimal places on the accrual rate</span></div>
+      <div class="metric"><b data-to="0">0</b><span>database writes per tick</span></div>
+      <div class="metric"><b data-to="52">0</b><span>automated tests</span></div>
+      <div class="metric"><b data-to="2">0</b><span>apps, one codebase</span></div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section>
-    <h2>What the numbers actually mean</h2>
-    <p class="sub">
-      A growing figure is not money you have received, and this app is careful never to
-      suggest otherwise.
+<section>
+  <div class="wrap">
+    <div class="kicker rv">How it works</div>
+    <h2 class="rv">Nothing is counting.</h2>
+    <p class="sub rv">
+      The interesting part is what the app doesn't do. No timer increments a total,
+      which is precisely why the number is always right.
     </p>
-    <table>
-      <thead>
-        <tr><th>Figure</th><th>What it is</th></tr>
-      </thead>
-      <tbody>
-        <tr><td class="k">Expected</td><td>Shares × declared dividend per share. An estimate.</td></tr>
-        <tr><td class="k">Accumulating</td><td>Progress towards that estimate. Rounded <em>down</em>, so it is never overstated.</td></tr>
-        <tr><td class="k">Received</td><td>Only settled payments. The one figure that counts as income.</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <section>
-    <h2>Where the data comes from</h2>
-    <p class="sub">Yahoo Finance. It reports some things and not others, and the app distinguishes between them.</p>
-    <table>
-      <thead>
-        <tr><th>Field</th><th>Source</th></tr>
-      </thead>
-      <tbody>
-        <tr><td class="k">Share price</td><td class="yes">Reported</td></tr>
-        <tr><td class="k">Ex-dividend date</td><td class="yes">Reported</td></tr>
-        <tr><td class="k">Dividend per share</td><td class="yes">Reported</td></tr>
-        <tr><td class="k">Payment frequency</td><td>Inferred from the spacing of past ex-dates</td></tr>
-        <tr><td class="k">Payment date</td><td class="no">Estimated — Yahoo does not publish it</td></tr>
-        <tr><td class="k">Record date</td><td class="no">Unavailable — stored empty rather than guessed</td></tr>
-      </tbody>
-    </table>
-    <p class="sub" style="margin-top:22px">
-      Yield is a trailing twelve months of dividends actually paid, not one declaration
-      multiplied out — real companies vary their payouts, and special dividends exist.
-    </p>
-  </section>
-
-  <section>
-    <h2>Before you install</h2>
-    <div class="callout">
-      <p style="margin:0 0 10px"><strong>This is a personal project, not a financial product.</strong></p>
-      <p style="margin:0 0 10px">
-        Prices and dividend history come from an undocumented Yahoo Finance endpoint with no
-        service guarantee. Payment dates are estimates. Nothing here is investment advice, and
-        no figure in this app should be relied on for a financial decision.
-      </p>
-      <p style="margin:0">
-        The Windows build is unsigned, so SmartScreen will warn you. The Android build is
-        sideloaded for the same reason.
-      </p>
+    <div class="cards">
+      <div class="card rv"><span class="num">01</span><h3>A line, not a tally</h3><p>Each dividend stores four parameters — amount, window, rate, start. The figure is recomputed from the clock every frame.</p></div>
+      <div class="card rv"><span class="num">02</span><h3>Close it for a week</h3><p>Reopen and it shows the right number. Nothing was being counted, so there is no count to lose.</p></div>
+      <div class="card rv"><span class="num">03</span><h3>Works offline</h3><p>Your device already holds the parameters. It doesn't need the server to keep going.</p></div>
+      <div class="card rv"><span class="num">04</span><h3>Never floating point</h3><p>Money is <code>BigDecimal</code> throughout and crosses the network as text — a JSON number becomes a double and quietly destroys a per-second rate.</p></div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <footer>
-    <p style="margin:0 0 6px">Kotlin · Jetpack Compose · Compose Multiplatform · Spring Boot · PostgreSQL</p>
-    <p style="margin:0">One codebase, two apps. <a href="https://github.com/JTing904/Divided-Tracker/blob/main/docs/ARCHITECTURE.md">Architecture notes</a></p>
-  </footer>
+<section>
+  <div class="wrap">
+    <div class="kicker rv">Honesty</div>
+    <h2 class="rv">Three numbers, never confused.</h2>
+    <p class="sub rv">A growing figure is not money you have received, and this app never implies otherwise.</p>
+    <table class="rv">
+      <tr><td class="k">Expected</td><td>Shares × declared dividend per share. An estimate.</td></tr>
+      <tr><td class="k">Accumulating</td><td>Progress toward that estimate. Rounded <em>down</em>, so it is never overstated.</td></tr>
+      <tr><td class="k">Received</td><td>Settled payments only. The one figure that counts as income.</td></tr>
+    </table>
+  </div>
+</section>
 
-</div>
+<section>
+  <div class="wrap">
+    <div class="kicker rv">Data</div>
+    <h2 class="rv">What is reported, and what is not.</h2>
+    <p class="sub rv">
+      Prices and dividend history come from Yahoo Finance. It publishes some fields and
+      not others, and the app keeps the difference visible rather than papering over it.
+    </p>
+    <table class="rv">
+      <tr><td class="k">Share price</td><td><span class="tag real">Reported</span></td></tr>
+      <tr><td class="k">Ex-dividend date</td><td><span class="tag real">Reported</span></td></tr>
+      <tr><td class="k">Dividend per share</td><td><span class="tag real">Reported</span></td></tr>
+      <tr><td class="k">Frequency</td><td><span class="tag est">Inferred</span> from the spacing of past ex-dates</td></tr>
+      <tr><td class="k">Payment date</td><td><span class="tag est">Estimated</span> — Yahoo does not publish it</td></tr>
+      <tr><td class="k">Record date</td><td><span class="tag none">Unavailable</span> — left empty rather than guessed</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker rv">Before you install</div>
+    <h2 class="rv">The honest caveats.</h2>
+    <div class="note rv" style="margin-top:34px">
+      <p><strong>A personal project, not a financial product.</strong></p>
+      <p>Data comes from an undocumented endpoint with no service guarantee. Payment dates are estimates. Prices are delayed 15–30 minutes, so this is not a trading tool.</p>
+      <p>Nothing here is investment advice, and no figure in this app should be relied on for a financial decision.</p>
+      <p>Neither build is code-signed, so Windows SmartScreen and Android will both warn you before installing.</p>
+    </div>
+    <div class="cta rv" style="justify-content:flex-start;margin-top:38px">
+      <a class="btn primary" href="https://github.com/JTing904/Divided-Tracker/releases/latest">
+        <strong>Download</strong><span>Windows · Android</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer><div class="wrap"><div class="row">
+  <span>Kotlin · Compose Multiplatform · Spring Boot · PostgreSQL</span>
+  <span><a href="https://github.com/JTing904/Divided-Tracker">GitHub</a> · <a href="https://github.com/JTing904/Divided-Tracker/blob/main/docs/ARCHITECTURE.md">Architecture</a></span>
+</div></div></footer>
 
 <script>
-  // Mirrors the app: a rate and a start point, evaluated against the clock. Nothing is
-  // incremented, so the figure stays correct even if a frame is dropped or the tab sleeps.
-  const RATE = 0.00002035;          // RM per second, the semi-annual RM320 worked example
-  const BASE = 289.297390;          // where this demonstration starts
-  const t0 = Date.now();
+(function(){
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const head = document.getElementById('head');
-  const tail = document.getElementById('tail');
-
-  function frame() {
-    const value = BASE + ((Date.now() - t0) / 1000) * RATE;
-    // Round down: an unpaid estimate should never be shown larger than it is.
-    const s = (Math.floor(value * 1e6) / 1e6).toFixed(6);
-    const dot = s.indexOf('.');
-    head.textContent = s.slice(0, dot + 3);   // whole units and cents
-    tail.textContent = s.slice(dot + 3);      // the fast-moving digits, dimmed
-    requestAnimationFrame(frame);
+  /* Counter — the same shape the app uses: a rate evaluated against the clock, never a
+     value being incremented. A dropped frame or a sleeping tab cannot make it drift. */
+  const RATE = 0.00002035, BASE = 289.297390, t0 = Date.now();
+  const head = document.getElementById('head'), tail = document.getElementById('tail');
+  function tick(){
+    const v = BASE + ((Date.now() - t0) / 1000) * RATE;
+    const s = (Math.floor(v * 1e6) / 1e6).toFixed(6), d = s.indexOf('.');
+    head.textContent = s.slice(0, d + 3);
+    tail.textContent = s.slice(d + 3);
+    requestAnimationFrame(tick);
   }
-  requestAnimationFrame(frame);
+  requestAnimationFrame(tick);
+
+  /* Scroll reveals, staggered by position within their section so groups arrive as a
+     wave rather than all at once. */
+  const items = document.querySelectorAll('.rv');
+  if (still || !('IntersectionObserver' in window)) {
+    items.forEach(el => el.classList.add('in'));
+  } else {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e, i) => {
+        if (!e.isIntersecting) return;
+        e.target.style.transitionDelay = Math.min(i * 70, 280) + 'ms';
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    items.forEach(el => io.observe(el));
+  }
+
+  /* Metrics count up once, on first sight. */
+  const nums = document.querySelectorAll('.metric b[data-to]');
+  const runNum = (el) => {
+    const to = +el.dataset.to;
+    if (still || to === 0) { el.textContent = to; return; }
+    const start = performance.now(), dur = 1100;
+    const step = (now) => {
+      const p = Math.min((now - start) / dur, 1);
+      el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3)));   // ease-out cubic
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  if ('IntersectionObserver' in window) {
+    const io2 = new IntersectionObserver((es) => es.forEach(e => {
+      if (e.isIntersecting) { runNum(e.target); io2.unobserve(e.target); }
+    }), { threshold: 0.5 });
+    nums.forEach(el => io2.observe(el));
+  } else { nums.forEach(runNum); }
+
+  /* Nav gains its backdrop only once the hero has scrolled under it. */
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('stuck', window.scrollY > 40);
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
 </script>
 
 </body>
