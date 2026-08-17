@@ -14,6 +14,8 @@ import java.time.Instant
 
 data class PortfolioUiState(
     val isLoading: Boolean = true,
+    /** A pull-to-refresh in flight. Distinct from [isLoading], which blanks the screen. */
+    val isRefreshing: Boolean = false,
     val portfolio: PortfolioDto? = null,
     val isStale: Boolean = false,
     val cachedAt: Instant? = null,
@@ -32,14 +34,18 @@ class PortfolioViewModel(private val portfolioRepository: PortfolioRepository) :
         refresh()
     }
 
-    fun refresh() {
+    /** [fromPull] keeps the pull-to-refresh spinner turning over data already on screen. */
+    fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = it.portfolio == null, error = null) }
+            _state.update {
+                it.copy(isLoading = it.portfolio == null, isRefreshing = fromPull, error = null)
+            }
 
             when (val result = portfolioRepository.portfolio()) {
                 is AppResult.Success -> _state.update {
                     it.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         portfolio = result.data.value,
                         isStale = result.data.isStale,
                         cachedAt = result.data.cachedAt,
@@ -47,7 +53,9 @@ class PortfolioViewModel(private val portfolioRepository: PortfolioRepository) :
                     )
                 }
 
-                is AppResult.Failure -> _state.update { it.copy(isLoading = false, error = result.error) }
+                is AppResult.Failure -> _state.update {
+                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                }
             }
         }
     }

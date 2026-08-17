@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -170,35 +171,47 @@ private fun SignedInApp(
         ) {
             composable(Routes.DASHBOARD) {
                 val viewModel: DashboardViewModel = viewModel(factory = factory)
-                DashboardScreen(
-                    viewModel = viewModel,
-                    userName = userName,
-                    onAddStock = { navController.navigate(Routes.ADD_STOCK) },
-                    onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
-                )
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
+                    DashboardScreen(
+                        viewModel = viewModel,
+                        userName = userName,
+                        onAddStock = { navController.navigate(Routes.ADD_STOCK) },
+                        onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
+                    )
+                }
             }
 
             composable(Routes.PORTFOLIO) {
                 val viewModel: PortfolioViewModel = viewModel(factory = factory)
-                PortfolioScreen(
-                    viewModel = viewModel,
-                    serverClock = container.serverClock,
-                    onAddStock = { navController.navigate(Routes.ADD_STOCK) },
-                    onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
-                )
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
+                    PortfolioScreen(
+                        viewModel = viewModel,
+                        serverClock = container.serverClock,
+                        onAddStock = { navController.navigate(Routes.ADD_STOCK) },
+                        onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
+                    )
+                }
             }
 
             composable(Routes.CALENDAR) {
                 val viewModel: CalendarViewModel = viewModel(factory = factory)
-                CalendarScreen(
-                    viewModel = viewModel,
-                    onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
-                )
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
+                    CalendarScreen(
+                        viewModel = viewModel,
+                        onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
+                    )
+                }
             }
 
             composable(Routes.HISTORY) {
                 val viewModel: HistoryViewModel = viewModel(factory = factory)
-                HistoryScreen(viewModel = viewModel)
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
+                    HistoryScreen(viewModel = viewModel)
+                }
             }
 
             composable(Routes.ADD_STOCK) {
@@ -225,6 +238,35 @@ private fun SignedInApp(
                 HoldingDetailScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
             }
         }
+    }
+}
+
+/**
+ * Wraps a tab in the pull-to-refresh gesture.
+ *
+ * It sits here, at the Android-only navigation layer, rather than inside the screens: the
+ * desktop build compiles those same screen files, and a pull gesture means nothing to a
+ * mouse. The cost is collecting the tab's state twice — once here for the spinner, once in
+ * the screen for its content — which is a second collector on the same StateFlow, not a
+ * second fetch.
+ *
+ * The gesture rides on nested scroll, so it is available wherever the tab has a scrolling
+ * list. A tab that failed to load its first page has nothing to scroll; that case is served
+ * by the retry button on the error banner instead.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PullToRefresh(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        content()
     }
 }
 

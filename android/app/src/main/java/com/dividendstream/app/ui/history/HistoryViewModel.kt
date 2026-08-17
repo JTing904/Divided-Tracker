@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 
 data class HistoryUiState(
     val isLoading: Boolean = true,
+    /** A pull-to-refresh in flight. Distinct from [isLoading], which blanks the screen. */
+    val isRefreshing: Boolean = false,
     val history: DividendHistoryDto? = null,
     val error: AppError? = null,
 ) {
@@ -28,15 +30,20 @@ class HistoryViewModel(private val dividendRepository: DividendRepository) : Vie
         refresh()
     }
 
-    fun refresh() {
+    /** [fromPull] keeps the pull-to-refresh spinner turning over data already on screen. */
+    fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = it.history == null, error = null) }
+            _state.update {
+                it.copy(isLoading = it.history == null, isRefreshing = fromPull, error = null)
+            }
             when (val result = dividendRepository.history()) {
                 is AppResult.Success -> _state.update {
-                    it.copy(isLoading = false, history = result.data, error = null)
+                    it.copy(isLoading = false, isRefreshing = false, history = result.data, error = null)
                 }
 
-                is AppResult.Failure -> _state.update { it.copy(isLoading = false, error = result.error) }
+                is AppResult.Failure -> _state.update {
+                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                }
             }
         }
     }

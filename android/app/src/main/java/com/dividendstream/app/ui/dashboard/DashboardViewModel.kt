@@ -17,6 +17,8 @@ import java.time.Instant
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
+    /** A pull-to-refresh in flight. Distinct from [isLoading], which blanks the screen. */
+    val isRefreshing: Boolean = false,
     val snapshot: LiveDividendDto? = null,
     /** Parameters the counter ticks from. Derived once per refresh, not per frame. */
     val streams: List<AccumulationStream> = emptyList(),
@@ -43,15 +45,21 @@ class DashboardViewModel(
      * Pulls a fresh snapshot. Cheap on the backend -- a single read, no writes -- because the
      * accumulating value is derived rather than stored, so calling this on every resume is
      * fine.
+     *
+     * [fromPull] drives the pull-to-refresh spinner, which has to keep turning while data is
+     * already on screen — the reason it cannot simply reuse [DashboardUiState.isLoading].
      */
-    fun refresh() {
+    fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = it.snapshot == null, error = null) }
+            _state.update {
+                it.copy(isLoading = it.snapshot == null, isRefreshing = fromPull, error = null)
+            }
 
             when (val result = dividendRepository.live()) {
                 is AppResult.Success -> _state.update {
                     it.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         snapshot = result.data.value,
                         streams = result.data.value.streams.map { stream -> stream.toAccumulationStream() },
                         isStale = result.data.isStale,
@@ -61,7 +69,7 @@ class DashboardViewModel(
                 }
 
                 is AppResult.Failure -> _state.update {
-                    it.copy(isLoading = false, error = result.error)
+                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
                 }
             }
         }

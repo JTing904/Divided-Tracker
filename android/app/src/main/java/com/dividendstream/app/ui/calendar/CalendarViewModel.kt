@@ -24,6 +24,8 @@ data class CalendarMonth(
 
 data class CalendarUiState(
     val isLoading: Boolean = true,
+    /** A pull-to-refresh in flight. Distinct from [isLoading], which blanks the screen. */
+    val isRefreshing: Boolean = false,
     val currency: String = "MYR",
     val totalExpected: BigDecimal = BigDecimal.ZERO,
     val expectedThisMonth: BigDecimal = BigDecimal.ZERO,
@@ -46,9 +48,12 @@ class CalendarViewModel(
         refresh()
     }
 
-    fun refresh() {
+    /** [fromPull] keeps the pull-to-refresh spinner turning over data already on screen. */
+    fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = it.months.isEmpty(), error = null) }
+            _state.update {
+                it.copy(isLoading = it.months.isEmpty(), isRefreshing = fromPull, error = null)
+            }
 
             when (val result = dividendRepository.upcoming()) {
                 is AppResult.Success -> {
@@ -71,6 +76,7 @@ class CalendarViewModel(
                     _state.update {
                         it.copy(
                             isLoading = false,
+                            isRefreshing = false,
                             currency = result.data.currency,
                             totalExpected = result.data.totalExpected,
                             expectedThisMonth = months
@@ -83,7 +89,9 @@ class CalendarViewModel(
                     }
                 }
 
-                is AppResult.Failure -> _state.update { it.copy(isLoading = false, error = result.error) }
+                is AppResult.Failure -> _state.update {
+                    it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                }
             }
         }
     }
