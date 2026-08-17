@@ -47,4 +47,7 @@ ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+UseSerialGC"
 #   DIVIDEND_BACKFILL=false
 #   CORS_ALLOWED_ORIGINS  only if a browser client is ever added
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
+# Render, Fly, Koyeb and friends inject the port to listen on as PORT and then health-check
+# it. Spring reads SERVER_PORT, so a container that ignored PORT would bind 8080, fail every
+# health check and be killed as unhealthy. PORT wins where it exists, SERVER_PORT otherwise.
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -Dserver.port=${PORT:-${SERVER_PORT:-8080}} -jar app.jar"]
