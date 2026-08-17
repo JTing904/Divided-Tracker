@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release configuration: everything must be HTTPS, with no exceptions.
+
+  Debug builds replace this file wholesale with src/debug/res/xml/network_security_config.xml,
+  which relaxes the rule so a local backend on plain HTTP is reachable. Keeping the exception
+  in that source set means it cannot leak into a shipped APK.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

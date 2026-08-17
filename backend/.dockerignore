@@ -1,0 +1,12 @@
+# Keep the build context small and keep secrets out of the image.
+.env
+.env.*
+!.env.example
+
+build/
+.gradle/
+*.log
+
+.git/
+.idea/
+*.iml

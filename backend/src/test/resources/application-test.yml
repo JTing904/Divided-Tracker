@@ -1,0 +1,24 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  cache:
+    type: caffeine
+
+dividend-stream:
+  jwt:
+    secret: test-only-signing-secret-that-is-long-enough
+    access-token-ttl: PT15M
+  # Background jobs would race the assertions; tests drive the services directly instead.
+  scheduling:
+    enabled: false
+  rate-limit:
+    auth-requests-per-minute: 1000
+
+logging:
+  level:
+    org.flywaydb: WARN
+    org.hibernate: WARN

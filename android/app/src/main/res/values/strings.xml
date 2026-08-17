@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Dividend Stream</string>
+    <string name="app_tagline">Watch your dividends grow</string>
+
+    <!-- Estimates must always read as estimates. -->
+    <string name="live_headline">YOUR DIVIDEND IS GROWING</string>
+    <string name="estimate_disclaimer">Estimated accumulation towards your expected dividend. Not money received, and not a guarantee of payment.</string>
+</resources>

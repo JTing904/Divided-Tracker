@@ -1,0 +1,44 @@
+# --- Secrets (never commit) ---
+.env
+*.env
+!.env.example
+*.jks
+*.keystore
+local.properties
+secrets.properties
+
+# --- Gradle ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/**/build/
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+out/
+
+# --- Android ---
+*.apk
+*.aab
+*.ap_
+*.dex
+captures/
+.cxx/
+
+# --- JVM ---
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs and packaged binaries
+dist/

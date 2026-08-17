@@ -1,0 +1,9 @@
+# Local development. Activated by `./gradlew bootTestRun`, which also supplies an
+# in-process PostgreSQL server. No secrets belong in this file.
+logging:
+  level:
+    com.dividendstream: DEBUG
+
+dividend-stream:
+  scheduling:
+    enabled: true
