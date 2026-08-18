@@ -199,19 +199,21 @@ class VerticalSliceIntegrationTest {
     }
 
     @Test
-    @DisplayName("the same stock cannot be added twice")
-    fun `rejects a duplicate holding`() {
-        val token = register("duplicate@example.com")
+    @DisplayName("buying more of a held stock enlarges the position at a weighted average")
+    fun `adding the same stock again merges the position`() {
+        val token = register("topup@example.com")
         addHolding(token, "1155", "1000", "9.50")
 
-        mockMvc.perform(
-            post("/api/portfolio")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"symbol":"1155","quantity":"500","averagePrice":"9.50"}"""),
-        )
-            .andExpect(status().isConflict)
-            .andExpect(jsonPath("$.code").value("HOLDING_ALREADY_EXISTS"))
+        // (1000 * 9.50 + 500 * 11.00) / 1500 = 15000 / 1500 = 10.00
+        val merged = addHolding(token, "1155", "500", "11.00")
+
+        assertThat(merged["quantity"].asText()).isEqualTo("1500.0000")
+        assertThat(merged["averagePrice"].asText()).isEqualTo("10.0000")
+
+        // One position, not two: the portfolio is a set of holdings, one per stock.
+        val portfolio = getJson("/api/portfolio", token)
+        assertThat(portfolio["holdings"]).hasSize(1)
+        assertThat(portfolio["totalCostBasis"].asText()).isEqualTo("15000.00")
     }
 
     // --- helpers -----------------------------------------------------------------

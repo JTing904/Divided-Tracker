@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
+import com.dividendstream.app.core.dataOrNull
 import com.dividendstream.app.data.remote.StockDetailDto
+import com.dividendstream.app.data.remote.HoldingDto
 import com.dividendstream.app.data.remote.StockSummaryDto
 import com.dividendstream.app.data.repository.PortfolioRepository
 import kotlinx.coroutines.Job
@@ -27,7 +29,13 @@ data class AddStockUiState(
     val isSubmitting: Boolean = false,
     val error: AppError? = null,
     val savedHoldingSymbol: String? = null,
+    /**
+     * The position already held in this stock, if any. Its presence changes what the price
+     * field means: not the running average, but what was paid this time.
+     */
+    val existing: HoldingDto? = null,
 ) {
+    val isTopUp: Boolean get() = existing != null
     val parsedQuantity: BigDecimal? get() = quantity.toBigDecimalOrNullSafe()
     val parsedAveragePrice: BigDecimal? get() = averagePrice.toBigDecimalOrNullSafe()
 
@@ -40,6 +48,27 @@ data class AddStockUiState(
             val shares = parsedQuantity ?: return null
             val perShare = selectedDetail?.dividendPerShare ?: return null
             return shares.multiply(perShare).setScale(2, RoundingMode.HALF_UP)
+        }
+
+    /**
+     * What the position will look like afterwards, for display only.
+     *
+     * The backend computes and stores the real figure; this repeats the arithmetic so the
+     * consequence of pressing the button is visible before it is pressed. Same formula and same
+     * scale, so the two agree -- but the stored value is always the one that came back.
+     */
+    val mergedPreview: Pair<BigDecimal, BigDecimal>?
+        get() {
+            val held = existing ?: return null
+            val buying = parsedQuantity?.takeIf { it.signum() > 0 } ?: return null
+            val price = parsedAveragePrice ?: return null
+
+            val totalQuantity = held.quantity + buying
+            if (totalQuantity.signum() <= 0) return null
+
+            val totalCost = held.quantity.multiply(held.averagePrice) + buying.multiply(price)
+            return totalQuantity.setScale(4, RoundingMode.HALF_UP) to
+                totalCost.divide(totalQuantity, 4, RoundingMode.HALF_UP)
         }
 
     val canSubmit: Boolean
@@ -58,6 +87,20 @@ class AddStockViewModel(private val portfolioRepository: PortfolioRepository) : 
     val state = _state.asStateFlow()
 
     private var searchJob: Job? = null
+
+    /** Held positions, so selecting a stock can say whether this is a top-up. */
+    private var holdings: List<HoldingDto> = emptyList()
+
+    init {
+        viewModelScope.launch {
+            holdings = portfolioRepository.portfolio().dataOrNull()?.value?.holdings.orEmpty()
+            // A stock may already have been chosen while this was in flight.
+            _state.update { it.copy(existing = it.selected?.let(::heldPosition)) }
+        }
+    }
+
+    private fun heldPosition(stock: StockSummaryDto): HoldingDto? =
+        holdings.firstOrNull { it.symbol.equals(stock.symbol, ignoreCase = true) }
 
     /** Debounced: a search fires only once typing pauses, not on every keystroke. */
     fun onQueryChange(value: String) {
@@ -83,6 +126,7 @@ class AddStockViewModel(private val portfolioRepository: PortfolioRepository) : 
         _state.update {
             it.copy(
                 selected = stock,
+                existing = heldPosition(stock),
                 results = emptyList(),
                 query = stock.companyName,
                 averagePrice = it.averagePrice.ifBlank { stock.lastPrice?.toPlainString().orEmpty() },
@@ -100,7 +144,9 @@ class AddStockViewModel(private val portfolioRepository: PortfolioRepository) : 
     }
 
     fun clearSelection() {
-        _state.update { it.copy(selected = null, selectedDetail = null, query = "", results = emptyList()) }
+        _state.update {
+            it.copy(selected = null, selectedDetail = null, existing = null, query = "", results = emptyList())
+        }
     }
 
     fun onQuantityChange(value: String) = _state.update { it.copy(quantity = value, error = null) }

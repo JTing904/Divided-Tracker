@@ -1,6 +1,5 @@
 package com.dividendstream.api.portfolio
 
-import com.dividendstream.api.common.ConflictException
 import com.dividendstream.api.common.InvalidRequestException
 import com.dividendstream.api.common.Money
 import com.dividendstream.api.common.NotFoundException
@@ -74,12 +73,7 @@ class PortfolioService(
     fun addHolding(userId: UUID, request: CreateHoldingRequest): HoldingResponse {
         val stock = stockService.importBySymbol(request.symbol)
 
-        holdingRepository.findByUserIdAndStockId(userId, stock.id).ifPresent {
-            throw ConflictException(
-                "HOLDING_ALREADY_EXISTS",
-                "${stock.companyName} is already in your portfolio. Edit the position instead.",
-            )
-        }
+        val existing = holdingRepository.findByUserIdAndStockId(userId, stock.id).orElse(null)
 
         request.manualDividend?.let { manual ->
             if (!manual.paymentDate.isAfter(manual.exDate)) {
@@ -98,14 +92,37 @@ class PortfolioService(
             )
         }
 
-        val holding = holdingRepository.save(
-            HoldingEntity(
-                userId = userId,
-                stock = stock,
-                quantity = Money.quantity(request.quantity),
-                averagePrice = request.averagePrice.setScale(4, java.math.RoundingMode.HALF_UP),
-            ),
-        )
+        // Buying more of something already held enlarges the position rather than replacing
+        // it, and the resulting average price is computed here. Refusing the request instead --
+        // as this did -- left the owner to work the average out by hand and type it in, which
+        // is arithmetic no one should be doing about their own money, and wrong forever if
+        // they slip. Correcting a mistyped position is a different intent and stays on PUT.
+        val holding = if (existing == null) {
+            holdingRepository.save(
+                HoldingEntity(
+                    userId = userId,
+                    stock = stock,
+                    quantity = Money.quantity(request.quantity),
+                    averagePrice = request.averagePrice.setScale(
+                        PositionMerge.PRICE_SCALE,
+                        java.math.RoundingMode.HALF_UP,
+                    ),
+                ),
+            )
+        } else {
+            val merged = PositionMerge.merge(
+                existingQuantity = existing.quantity,
+                existingAveragePrice = existing.averagePrice,
+                purchasedQuantity = request.quantity,
+                purchasePrice = request.averagePrice,
+            )
+            existing.quantity = merged.quantity
+            existing.averagePrice = merged.averagePrice
+            holdingRepository.save(existing)
+        }
+
+        // The expected dividend and the per-second rate are both derived from the share count,
+        // so a purchase has to re-derive them or the counter keeps running at the old size.
         dividendTransactionService.syncHolding(holding)
 
         return describe(userId, holding)

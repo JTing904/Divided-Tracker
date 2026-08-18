@@ -43,7 +43,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dividendstream.app.core.formatMoney
+import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.core.formatPercent
+import com.dividendstream.app.data.remote.HoldingDto
 import com.dividendstream.app.data.remote.StockSummaryDto
 import com.dividendstream.app.ui.components.DsCard
 import com.dividendstream.app.ui.components.DsTextField
@@ -140,13 +142,18 @@ fun AddStockScreen(
                 )
 
                 DsTextField(
-                    label = "Average purchase price",
+                    // The same field means two things, and saying which one matters: typing a
+                    // running average into a top-up would skew the position it is merged into.
+                    label = if (state.isTopUp) "Price paid per share" else "Average purchase price",
                     value = state.averagePrice,
                     onValueChange = viewModel::onAveragePriceChange,
                     placeholder = "9.80",
                     keyboardType = KeyboardType.Decimal,
                     imeAction = ImeAction.Done,
+                    supportingText = if (state.isTopUp) "What you paid this time, not your average" else null,
                 )
+
+                state.existing?.let { held -> TopUpSummary(held, state) }
 
                 DividendProjection(state)
             }
@@ -157,7 +164,7 @@ fun AddStockScreen(
 
             if (state.selected != null) {
                 PrimaryButton(
-                    text = "Add to portfolio",
+                    text = if (state.isTopUp) "Add to position" else "Add to portfolio",
                     onClick = viewModel::submit,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.canSubmit,
@@ -325,5 +332,44 @@ private fun SymbolBadge(companyName: String) {
         contentAlignment = Alignment.Center,
     ) {
         Text(initials, style = MonoFigure, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Spells out what pressing the button does to an existing position.
+ *
+ * The weighted average is arithmetic the owner used to have to do themselves, and the point of
+ * showing it is that a purchase changes the cost basis -- quietly, if nobody says so.
+ */
+@Composable
+private fun TopUpSummary(held: HoldingDto, state: AddStockUiState) {
+    DsCard(modifier = Modifier.fillMaxWidth()) {
+        OverlineText("You already hold")
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "${held.quantity.formatShares()} shares at " +
+                held.averagePrice.formatMoney(held.currency, 4),
+            style = MonoFigure,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        state.mergedPreview?.let { (quantity, averagePrice) ->
+            Spacer(Modifier.height(14.dp))
+            OverlineText("After this purchase")
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "${quantity.formatShares()} shares at " +
+                    averagePrice.formatMoney(held.currency, 4),
+                style = MonoFigure,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Your average is worked out for you. The figure the server stores is the one " +
+                    "that counts.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
