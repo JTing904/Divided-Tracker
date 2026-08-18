@@ -129,6 +129,7 @@ class AuthService(
     fun googleConfig(): GoogleConfigResponse = GoogleConfigResponse(
         enabled = googleProperties.isConfigured,
         desktopEnabled = googleProperties.isDesktopConfigured,
+        webClientId = googleProperties.webClientId.takeIf { it.isNotBlank() },
         desktopClientId = googleProperties.desktopClientId.takeIf { it.isNotBlank() },
     )
 

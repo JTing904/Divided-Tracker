@@ -26,10 +26,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -281,6 +283,60 @@ fun UpdateAvailableBanner(
                 modifier = Modifier.size(16.dp),
             )
         }
+    }
+}
+
+/**
+ * The alternative sign-in button.
+ *
+ * Deliberately outlined rather than filled: there are two ways in and neither is the "real"
+ * one, so neither gets the emphasis of a primary button.
+ *
+ * No Google logo. Their branding rules require their own supplied asset, and an approximation
+ * drawn here would be both inaccurate and someone else's trademark.
+ */
+@Composable
+fun SecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(54.dp),
+        enabled = enabled && !loading,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        } else {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/** A labelled rule, for "or" between two equally valid choices. */
+@Composable
+fun LabelledDivider(label: String, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outline)
     }
 }
 

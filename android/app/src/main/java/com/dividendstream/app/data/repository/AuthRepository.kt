@@ -7,6 +7,10 @@ import com.dividendstream.app.data.local.SessionStore
 import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.AuthResponse
 import com.dividendstream.app.data.remote.DividendStreamApi
+import com.dividendstream.app.data.remote.GoogleAuthAttempt
+import com.dividendstream.app.data.remote.GoogleConfigDto
+import com.dividendstream.app.data.remote.GoogleDesktopSignInRequest
+import com.dividendstream.app.data.remote.GoogleSignInRequest
 import com.dividendstream.app.data.remote.LoginRequest
 import com.dividendstream.app.data.remote.RegisterRequest
 import com.dividendstream.app.data.remote.apiCall
@@ -48,6 +52,45 @@ class AuthRepository(
         apiCall(json) { api.login(LoginRequest(email.trim(), password)) }
             .also { it.persistOnSuccess() }
             .map { it.toSession() }
+
+    /**
+     * Whether this server offers Google sign-in, and what the desktop flow needs to start one.
+     *
+     * Served rather than compiled in, so the client IDs have a single home and changing one
+     * does not mean rebuilding and redistributing both applications.
+     */
+    suspend fun googleConfig(): AppResult<GoogleConfigDto> = apiCall(json) { api.googleConfig() }
+
+    /**
+     * Exchanges whatever the platform obtained from Google for a session here.
+     *
+     * The invite code rides along because the backend may be about to create an account, and
+     * only it can tell: the user does not know whether this Google account is already known.
+     */
+    suspend fun signInWithGoogle(
+        attempt: GoogleAuthAttempt,
+        inviteCode: String,
+    ): AppResult<Session> {
+        val code = inviteCode.trim().takeIf { it.isNotEmpty() }
+        return apiCall(json) {
+            when (attempt) {
+                is GoogleAuthAttempt.IdToken ->
+                    api.googleSignIn(GoogleSignInRequest(attempt.idToken, code))
+
+                is GoogleAuthAttempt.AuthorizationCode ->
+                    api.googleDesktopSignIn(
+                        GoogleDesktopSignInRequest(
+                            code = attempt.code,
+                            codeVerifier = attempt.codeVerifier,
+                            redirectUri = attempt.redirectUri,
+                            inviteCode = code,
+                        ),
+                    )
+            }
+        }
+            .also { it.persistOnSuccess() }
+            .map { it.toSession() }
+    }
 
     /**
      * Clears local state whether or not the server call succeeds. Failing to reach the

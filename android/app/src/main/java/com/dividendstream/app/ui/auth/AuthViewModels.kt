@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
+import com.dividendstream.app.core.dataOrNull
+import com.dividendstream.app.data.remote.GoogleConfigDto
 import com.dividendstream.app.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,8 +17,22 @@ data class LoginUiState(
     val password: String = "",
     val isSubmitting: Boolean = false,
     val error: AppError? = null,
+    /** What this server offers. Null until asked; Google is not shown before then. */
+    val google: GoogleConfigDto? = null,
+    /** A Google sign-in in progress. Separate, so it does not disable the password button. */
+    val isGoogleSubmitting: Boolean = false,
+    /**
+     * Shown only when the server asked for a code and refused without one, which is the first
+     * moment anyone can know it was needed: whether a Google sign-in creates an account is
+     * something only the server can tell.
+     */
+    val needsInviteCode: Boolean = false,
+    val inviteCode: String = "",
 ) {
-    val canSubmit: Boolean get() = email.isNotBlank() && password.isNotBlank() && !isSubmitting
+    val canSubmit: Boolean
+        get() = email.isNotBlank() && password.isNotBlank() && !isSubmitting && !isGoogleSubmitting
+
+    val showGoogle: Boolean get() = google?.enabled == true
 }
 
 class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
@@ -24,9 +40,73 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
     private val _state = MutableStateFlow(LoginUiState())
     val state = _state.asStateFlow()
 
+    init {
+        loadGoogleConfig()
+    }
+
+    /**
+     * Failure here is silent on purpose: it means Google sign-in is not offered this time, and
+     * the password form beside it works perfectly well. An error about a sign-in method the
+     * person may not even want would be noise in front of the one they can use.
+     */
+    private fun loadGoogleConfig() {
+        viewModelScope.launch {
+            val config = authRepository.googleConfig().dataOrNull() ?: return@launch
+            _state.update { it.copy(google = config) }
+        }
+    }
+
     fun onEmailChange(value: String) = _state.update { it.copy(email = value, error = null) }
 
     fun onPasswordChange(value: String) = _state.update { it.copy(password = value, error = null) }
+
+    fun onInviteCodeChange(value: String) = _state.update { it.copy(inviteCode = value, error = null) }
+
+    /**
+     * Runs a Google sign-in end to end: the platform obtains something, the backend turns it
+     * into a session.
+     *
+     * [launch] returning null means the person closed the picker, and nothing is said about it.
+     */
+    fun signInWithGoogle(launcher: GoogleSignInLauncher) {
+        val config = _state.value.google ?: return
+        if (_state.value.isGoogleSubmitting || _state.value.isSubmitting) return
+
+        viewModelScope.launch {
+            _state.update { it.copy(isGoogleSubmitting = true, error = null) }
+
+            val attempt = try {
+                launcher.launch(config)
+            } catch (failed: GoogleSignInFailed) {
+                _state.update {
+                    it.copy(
+                        isGoogleSubmitting = false,
+                        error = AppError("GOOGLE_SIGN_IN_FAILED", failed.message.orEmpty(), isRetryable = true),
+                    )
+                }
+                return@launch
+            }
+
+            if (attempt == null) {
+                _state.update { it.copy(isGoogleSubmitting = false) }
+                return@launch
+            }
+
+            when (val result = authRepository.signInWithGoogle(attempt, _state.value.inviteCode)) {
+                is AppResult.Success -> _state.update { it.copy(isGoogleSubmitting = false) }
+                is AppResult.Failure -> _state.update {
+                    it.copy(
+                        isGoogleSubmitting = false,
+                        // The server has just told us this Google account is new here and the
+                        // code is required. Revealing the field now, rather than always, keeps
+                        // it out of the way of everyone signing back in.
+                        needsInviteCode = it.needsInviteCode || result.error.code == "INVALID_INVITE_CODE",
+                        error = result.error,
+                    )
+                }
+            }
+        }
+    }
 
     /** Navigation is driven by [com.dividendstream.app.ui.SessionViewModel] observing the store. */
     fun submit() {

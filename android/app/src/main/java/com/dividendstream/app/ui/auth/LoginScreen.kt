@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.MaterialTheme
@@ -28,7 +29,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dividendstream.app.ui.components.DsCard
 import com.dividendstream.app.ui.components.DsTextField
 import com.dividendstream.app.ui.components.ErrorBanner
+import com.dividendstream.app.ui.components.LabelledDivider
 import com.dividendstream.app.ui.components.PrimaryButton
+import com.dividendstream.app.ui.components.SecondaryButton
 
 @Composable
 fun LoginScreen(
@@ -37,6 +40,7 @@ fun LoginScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val googleLauncher = rememberGoogleSignInLauncher()
 
     Column(
         modifier = modifier
@@ -63,6 +67,43 @@ fun LoginScreen(
         )
 
         Spacer(Modifier.height(28.dp))
+
+        // Google first, because it is the shorter path for anyone it applies to, and the form
+        // below stays fully usable for everyone else. Hidden entirely unless this server has
+        // it configured -- an button that cannot work is worse than no button.
+        if (state.showGoogle && googleLauncher.isSupported) {
+            DsCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            ) {
+                SecondaryButton(
+                    text = "Continue with Google",
+                    onClick = { viewModel.signInWithGoogle(googleLauncher) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isSubmitting,
+                    loading = state.isGoogleSubmitting,
+                )
+
+                // Revealed only once the server has refused for want of one. Until then nobody
+                // knows whether this Google account is new here, and asking everybody for a
+                // code they mostly do not need is the wrong default.
+                if (state.needsInviteCode) {
+                    Spacer(Modifier.height(16.dp))
+                    DsTextField(
+                        label = "Invite code",
+                        value = state.inviteCode,
+                        onValueChange = viewModel::onInviteCodeChange,
+                        placeholder = "Ask whoever shared this app",
+                        leadingIcon = Icons.Default.Key,
+                        imeAction = ImeAction.Done,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            LabelledDivider("or")
+            Spacer(Modifier.height(20.dp))
+        }
 
         DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
             DsTextField(

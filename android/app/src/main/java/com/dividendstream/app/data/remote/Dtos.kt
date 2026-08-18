@@ -272,3 +272,42 @@ fun DividendDto.toAccumulationStream() = AccumulationStream(
     start = accumulationStart,
     end = accumulationEnd,
 )
+
+// --- google sign-in ----------------------------------------------------------
+
+@Serializable
+data class GoogleConfigDto(
+    val enabled: Boolean = false,
+    val desktopEnabled: Boolean = false,
+    /** What Android passes to Credential Manager: the Web client ID, not the Android one. */
+    val webClientId: String? = null,
+    val desktopClientId: String? = null,
+)
+
+@Serializable
+data class GoogleSignInRequest(val idToken: String, val inviteCode: String? = null)
+
+@Serializable
+data class GoogleDesktopSignInRequest(
+    val code: String,
+    val codeVerifier: String,
+    val redirectUri: String,
+    val inviteCode: String? = null,
+)
+
+/**
+ * What a platform managed to obtain from Google, before the backend turns it into a session.
+ *
+ * The two clients cannot produce the same thing. The phone is handed a finished ID token by
+ * Credential Manager; the desktop only gets an authorisation code, because redeeming one needs
+ * the client secret and an installed binary is no place to keep it.
+ */
+sealed interface GoogleAuthAttempt {
+    data class IdToken(val idToken: String) : GoogleAuthAttempt
+
+    data class AuthorizationCode(
+        val code: String,
+        val codeVerifier: String,
+        val redirectUri: String,
+    ) : GoogleAuthAttempt
+}

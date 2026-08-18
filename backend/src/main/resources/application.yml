@@ -80,6 +80,8 @@ dividend-stream:
     # Every OAuth client ID allowed in a token's audience, comma-separated: the Web client ID
     # the phone signs in through, and the desktop client ID. Blank disables Google sign-in.
     allowed-audiences: ${GOOGLE_ALLOWED_AUDIENCES:}
+    # Android signs in through the Web client ID; the Android client ID is never sent.
+    web-client-id: ${GOOGLE_WEB_CLIENT_ID:}
     desktop-client-id: ${GOOGLE_DESKTOP_CLIENT_ID:}
     # The one secret here, and the reason the desktop app posts its authorisation code to this
     # server instead of redeeming it itself.

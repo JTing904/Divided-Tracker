@@ -83,5 +83,7 @@ data class GoogleDesktopSignInRequest(
 data class GoogleConfigResponse(
     val enabled: Boolean,
     val desktopEnabled: Boolean,
+    /** What Android passes to Credential Manager. The Web client ID, not the Android one. */
+    val webClientId: String?,
     val desktopClientId: String?,
 )

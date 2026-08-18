@@ -44,6 +44,8 @@ sourceSets {
             "com/dividendstream/app/data/local/SnapshotCache.kt",
             // Reaches the container through LocalContext.
             "com/dividendstream/app/ui/AppViewModelProvider.kt",
+            // Credential Manager is Android-only; the desktop opens a browser instead.
+            "com/dividendstream/app/ui/auth/GoogleSignInLauncher.kt",
             // Uses navigation-compose and a bottom bar; desktop gets a sidebar instead.
             "com/dividendstream/app/ui/navigation/DividendStreamRoot.kt",
             // Touches the Activity window to tint the status bar.
@@ -118,6 +120,8 @@ compose.desktop {
                 "java.security.jgss",
                 "java.desktop",
                 "jdk.unsupported",
+                // The loopback listener desktop Google sign-in redirects back to.
+                "jdk.httpserver",
                 "jdk.crypto.ec",
             )
 

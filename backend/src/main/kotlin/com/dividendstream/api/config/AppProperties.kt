@@ -72,6 +72,15 @@ data class GoogleProperties(
      */
     val allowedAudiences: List<String> = emptyList(),
 
+    /**
+     * The *Web* OAuth client ID, which is what Android signs in through.
+     *
+     * Counter-intuitive and a common stumbling block: the Android client ID exists to bind the
+     * app's signing certificate to the project and is never sent anywhere. The token Credential
+     * Manager returns carries this one as its audience.
+     */
+    val webClientId: String = "",
+
     /** The desktop OAuth client. The ID is public; it travels in the browser's address bar. */
     val desktopClientId: String = "",
 

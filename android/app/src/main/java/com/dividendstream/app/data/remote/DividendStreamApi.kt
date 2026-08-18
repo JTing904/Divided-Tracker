@@ -19,6 +19,16 @@ interface DividendStreamApi {
     @POST("api/auth/refresh")
     suspend fun refresh(@Body request: RefreshRequest): AuthResponse
 
+    /** Whether Google sign-in is available, and the client ID the desktop flow needs. */
+    @GET("api/auth/google/config")
+    suspend fun googleConfig(): GoogleConfigDto
+
+    @POST("api/auth/google")
+    suspend fun googleSignIn(@Body request: GoogleSignInRequest): AuthResponse
+
+    @POST("api/auth/google/desktop")
+    suspend fun googleDesktopSignIn(@Body request: GoogleDesktopSignInRequest): AuthResponse
+
     @POST("api/auth/logout")
     suspend fun logout()
 
