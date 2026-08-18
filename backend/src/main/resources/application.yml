@@ -76,6 +76,14 @@ dividend-stream:
     invite-code: ${INVITE_CODE:}
   rate-limit:
     auth-requests-per-minute: ${AUTH_RATE_LIMIT:20}
+  google:
+    # Every OAuth client ID allowed in a token's audience, comma-separated: the Web client ID
+    # the phone signs in through, and the desktop client ID. Blank disables Google sign-in.
+    allowed-audiences: ${GOOGLE_ALLOWED_AUDIENCES:}
+    desktop-client-id: ${GOOGLE_DESKTOP_CLIENT_ID:}
+    # The one secret here, and the reason the desktop app posts its authorisation code to this
+    # server instead of redeeming it itself.
+    desktop-client-secret: ${GOOGLE_DESKTOP_CLIENT_SECRET:}
   release:
     # Set LATEST_CLIENT to the version you just published, so clients can tell they are
     # behind. Left blank, /api/app/version reports null and no client is nagged.

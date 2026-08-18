@@ -13,4 +13,6 @@ interface UserRepository : JpaRepository<UserEntity, UUID> {
 
     @Query("SELECT COUNT(u) > 0 FROM UserEntity u WHERE lower(u.email) = lower(:email)")
     fun existsByEmailIgnoreCase(@Param("email") email: String): Boolean
+
+    fun findByGoogleSubject(googleSubject: String): Optional<UserEntity>
 }

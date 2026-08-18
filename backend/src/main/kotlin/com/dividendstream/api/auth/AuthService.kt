@@ -28,6 +28,9 @@ class AuthService(
     private val jwtProperties: JwtProperties,
     private val clock: Clock,
     private val registrationProperties: RegistrationProperties,
+    private val googleTokenVerifier: GoogleTokenVerifier,
+    private val googleCodeExchanger: GoogleCodeExchanger,
+    private val googleProperties: com.dividendstream.api.config.GoogleProperties,
 ) {
 
     private val secureRandom = SecureRandom()
@@ -78,11 +81,15 @@ class AuthService(
 
         // Hash even when the user does not exist, so response time does not reveal which
         // emails are registered.
-        val passwordMatches = if (user == null) {
+        // Also covers an account created through Google, which has no password. It is told
+        // apart from a wrong password nowhere the caller can see: saying "this one uses
+        // Google" would confirm the address is registered to anyone who guessed it.
+        val storedHash = user?.passwordHash
+        val passwordMatches = if (storedHash == null) {
             passwordEncoder.matches(request.password, DUMMY_HASH)
             false
         } else {
-            passwordEncoder.matches(request.password, user.passwordHash)
+            passwordEncoder.matches(request.password, storedHash)
         }
 
         if (user == null || !passwordMatches) {
@@ -117,6 +124,70 @@ class AuthService(
     @Transactional
     fun logout(userId: UUID) {
         refreshTokenRepository.revokeAllForUser(userId, Instant.now(clock))
+    }
+
+    fun googleConfig(): GoogleConfigResponse = GoogleConfigResponse(
+        enabled = googleProperties.isConfigured,
+        desktopEnabled = googleProperties.isDesktopConfigured,
+        desktopClientId = googleProperties.desktopClientId.takeIf { it.isNotBlank() },
+    )
+
+    @Transactional
+    fun signInWithGoogle(request: GoogleSignInRequest): AuthResponse =
+        completeGoogleSignIn(googleTokenVerifier.verify(request.idToken), request.inviteCode)
+
+    @Transactional
+    fun signInWithGoogleCode(request: GoogleDesktopSignInRequest): AuthResponse {
+        val idToken = googleCodeExchanger.exchangeForIdToken(
+            code = request.code,
+            codeVerifier = request.codeVerifier,
+            redirectUri = request.redirectUri,
+        )
+        return completeGoogleSignIn(googleTokenVerifier.verify(idToken), request.inviteCode)
+    }
+
+    /**
+     * Three cases, and which one applies decides whether an invite code is needed.
+     *
+     * A returning Google user is recognised by `sub`, never by email: the subject is stable and
+     * cannot be reassigned, while an address can change hands.
+     *
+     * Someone who already registered with a password, using the same address, gets the two
+     * linked -- but only if Google says it verified the address. Skipping that check would let
+     * anyone put an unverified address on a fresh Google account and be handed the portfolio of
+     * whoever registered it here.
+     *
+     * Only the third case creates an account, and that is the one the invite code gates. Left
+     * ungated, an open Google endpoint would undo the whole reason the code exists, since
+     * anyone with a Google account could sign up.
+     */
+    private fun completeGoogleSignIn(identity: GoogleIdentity, inviteCode: String?): AuthResponse {
+        userRepository.findByGoogleSubject(identity.subject).orElse(null)?.let { existing ->
+            return issueSession(existing)
+        }
+
+        userRepository.findByEmailIgnoreCase(identity.email).orElse(null)?.let { existing ->
+            if (!identity.emailVerified) {
+                throw ForbiddenException(
+                    message = "That email already has an account. Sign in with your password instead.",
+                    code = "GOOGLE_EMAIL_UNVERIFIED",
+                )
+            }
+            existing.googleSubject = identity.subject
+            return issueSession(userRepository.save(existing))
+        }
+
+        requireValidInviteCode(inviteCode)
+
+        val created = userRepository.save(
+            UserEntity(
+                name = identity.name ?: identity.email.substringBefore('@'),
+                email = identity.email,
+                passwordHash = null,
+                googleSubject = identity.subject,
+            ),
+        )
+        return issueSession(created)
     }
 
     private fun issueSession(user: UserEntity): AuthResponse {

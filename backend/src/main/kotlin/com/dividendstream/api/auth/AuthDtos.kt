@@ -46,3 +46,42 @@ data class AuthResponse(
     val accessTokenExpiresAt: Instant,
     val user: UserProfileResponse,
 )
+
+/** Android: Credential Manager hands back an ID token directly. */
+data class GoogleSignInRequest(
+    @field:NotBlank(message = "Google token is required")
+    val idToken: String,
+
+    /** Required only for a *new* account, and only when the server requires one. */
+    @field:Size(max = 100, message = "Invite code is too long")
+    val inviteCode: String? = null,
+)
+
+/**
+ * Desktop: the browser hands back an authorisation code, redeemed here rather than on the
+ * client so the client secret never ships inside an installable binary.
+ */
+data class GoogleDesktopSignInRequest(
+    @field:NotBlank(message = "Authorisation code is required")
+    val code: String,
+
+    @field:NotBlank(message = "Code verifier is required")
+    val codeVerifier: String,
+
+    @field:NotBlank(message = "Redirect URI is required")
+    val redirectUri: String,
+
+    @field:Size(max = 100, message = "Invite code is too long")
+    val inviteCode: String? = null,
+)
+
+/**
+ * What a client needs to start a Google sign-in. Served rather than baked into each build, so
+ * the client IDs have one home. None of it is secret: [desktopClientId] travels in the
+ * browser's address bar, and the Android one is readable in any copy of the app.
+ */
+data class GoogleConfigResponse(
+    val enabled: Boolean,
+    val desktopEnabled: Boolean,
+    val desktopClientId: String?,
+)

@@ -43,6 +43,10 @@ class SecurityConfig(
             .authorizeHttpRequests { auth ->
                 auth
                     .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                    // Signing in is what these do; requiring a session to reach them would be
+                    // a circle. Each proves identity by its own means.
+                    .requestMatchers("/api/auth/google", "/api/auth/google/desktop").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/auth/google/config").permitAll()
                     // A client must be able to learn it is too old to be let in before it has
                     // a session, since being shut out is precisely when it needs to say why.
                     .requestMatchers(HttpMethod.GET, "/api/app/version").permitAll()

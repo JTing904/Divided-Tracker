@@ -60,6 +60,35 @@ data class RateLimitProperties(
     val authRequestsPerMinute: Int = 20,
 )
 
+@ConfigurationProperties(prefix = "dividend-stream.google")
+data class GoogleProperties(
+    /**
+     * Every OAuth client ID allowed to appear in a token's `aud` claim.
+     *
+     * A list because the two clients present different ones: the phone signs in through the
+     * Web client ID it passes to Credential Manager, the desktop through its own. Checking the
+     * audience is what stops an ID token minted for some *other* application -- a token its
+     * developer can read -- from being replayed here as a login.
+     */
+    val allowedAudiences: List<String> = emptyList(),
+
+    /** The desktop OAuth client. The ID is public; it travels in the browser's address bar. */
+    val desktopClientId: String = "",
+
+    /**
+     * The desktop client secret, which is why the desktop app sends its authorisation code here
+     * rather than redeeming it itself. Installed applications cannot keep a secret, and this
+     * project's rule is that third-party credentials live on the backend.
+     */
+    val desktopClientSecret: String = "",
+
+    val tokenUri: String = "https://oauth2.googleapis.com/token",
+) {
+    val isConfigured: Boolean get() = allowedAudiences.any { it.isNotBlank() }
+    val isDesktopConfigured: Boolean
+        get() = isConfigured && desktopClientId.isNotBlank() && desktopClientSecret.isNotBlank()
+}
+
 @ConfigurationProperties(prefix = "dividend-stream.release")
 data class ReleaseProperties(
     /**
