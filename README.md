@@ -52,7 +52,7 @@ Android app, sharing one codebase and one backend.
 
 ### The desktop app
 
-Install **`dist\DividendStream-1.0.3-installer.msi`** — a normal Windows installer that puts
+Install **`dist\DividendStream-1.0.4-installer.msi`** — a normal Windows installer that puts
 the app in the Start Menu. It bundles its own Java runtime, so the machine needs no JDK and
 no Gradle.
 

@@ -63,16 +63,6 @@ data class RateLimitProperties(
 @ConfigurationProperties(prefix = "dividend-stream.google")
 data class GoogleProperties(
     /**
-     * Every OAuth client ID allowed to appear in a token's `aud` claim.
-     *
-     * A list because the two clients present different ones: the phone signs in through the
-     * Web client ID it passes to Credential Manager, the desktop through its own. Checking the
-     * audience is what stops an ID token minted for some *other* application -- a token its
-     * developer can read -- from being replayed here as a login.
-     */
-    val allowedAudiences: List<String> = emptyList(),
-
-    /**
      * The *Web* OAuth client ID, which is what Android signs in through.
      *
      * Counter-intuitive and a common stumbling block: the Android client ID exists to bind the
@@ -91,9 +81,32 @@ data class GoogleProperties(
      */
     val desktopClientSecret: String = "",
 
+    /**
+     * Audiences to accept beyond the two client IDs above. Almost never needed; it exists so a
+     * client ID can be rotated without a moment where neither the old nor the new one works.
+     */
+    val extraAudiences: List<String> = emptyList(),
+
     val tokenUri: String = "https://oauth2.googleapis.com/token",
 ) {
-    val isConfigured: Boolean get() = allowedAudiences.any { it.isNotBlank() }
+    /**
+     * Every OAuth client ID allowed to appear in a token's `aud` claim.
+     *
+     * Derived rather than configured. The two client IDs are already here, and asking an
+     * operator to list them again in a third variable buys nothing and invites the one mistake
+     * nothing catches: omit one and that platform alone fails to sign in, with no sign of it
+     * until somebody presses the button.
+     *
+     * Checking the audience at all is what stops an ID token minted for some *other*
+     * application -- a token its developer can read -- from being replayed here as a login.
+     */
+    val allowedAudiences: List<String>
+        get() = (listOf(webClientId, desktopClientId) + extraAudiences)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+    val isConfigured: Boolean get() = allowedAudiences.isNotEmpty()
     val isDesktopConfigured: Boolean
         get() = isConfigured && desktopClientId.isNotBlank() && desktopClientSecret.isNotBlank()
 }

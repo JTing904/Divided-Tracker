@@ -77,9 +77,9 @@ dividend-stream:
   rate-limit:
     auth-requests-per-minute: ${AUTH_RATE_LIMIT:20}
   google:
-    # Every OAuth client ID allowed in a token's audience, comma-separated: the Web client ID
-    # the phone signs in through, and the desktop client ID. Blank disables Google sign-in.
-    allowed-audiences: ${GOOGLE_ALLOWED_AUDIENCES:}
+    # Accepted audiences are the two client IDs below; nothing lists them twice. This is only
+    # for rotating one without a gap where neither works.
+    extra-audiences: ${GOOGLE_EXTRA_AUDIENCES:}
     # Android signs in through the Web client ID; the Android client ID is never sent.
     web-client-id: ${GOOGLE_WEB_CLIENT_ID:}
     desktop-client-id: ${GOOGLE_DESKTOP_CLIENT_ID:}
