@@ -159,7 +159,8 @@ class LiveDividendService(
             frequency = resolved?.frequency,
             exDate = resolved?.exDate,
             recordDate = resolved?.recordDate,
-            paymentDate = transaction.paymentDate,
+            paymentDate = resolved?.actualPaymentDate ?: transaction.paymentDate,
+            paymentDateConfirmed = resolved?.actualPaymentDate != null,
             paidAt = transaction.paidAt,
         )
     }

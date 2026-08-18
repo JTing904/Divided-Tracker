@@ -109,6 +109,9 @@ data class CreateHoldingRequest(
 )
 
 @Serializable
+data class ConfirmReceivedRequest(val receivedOn: LocalDate)
+
+@Serializable
 data class UpdateHoldingRequest(val quantity: BigDecimal, val averagePrice: BigDecimal)
 
 @Serializable
@@ -192,6 +195,8 @@ data class DividendDto(
     val exDate: LocalDate? = null,
     val recordDate: LocalDate? = null,
     val paymentDate: LocalDate,
+    /** False means the date is this application's estimate, not the issuer's announcement. */
+    val paymentDateConfirmed: Boolean = false,
     val paidAt: Instant? = null,
 )
 

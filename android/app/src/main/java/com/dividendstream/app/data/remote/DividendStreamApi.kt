@@ -66,6 +66,13 @@ interface DividendStreamApi {
     @GET("api/dividends/history")
     suspend fun dividendHistory(): DividendHistoryDto
 
+    /** Records the day a dividend actually arrived; only its holder can know it. */
+    @POST("api/dividends/{id}/received")
+    suspend fun confirmReceived(
+        @Path("id") id: String,
+        @Body request: ConfirmReceivedRequest,
+    ): DividendDto
+
     @GET("api/dividends/{id}")
     suspend fun dividendDetail(@Path("id") id: String): DividendDto
 

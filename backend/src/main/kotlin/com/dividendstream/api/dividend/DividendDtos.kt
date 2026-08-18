@@ -80,7 +80,10 @@ data class DividendResponse(
     val frequency: DividendFrequency?,
     val exDate: LocalDate?,
     val recordDate: LocalDate?,
+    /** Estimated unless [paymentDateConfirmed]; no free source publishes it for Bursa. */
     val paymentDate: LocalDate,
+    /** True once somebody reported the day the money genuinely arrived. */
+    val paymentDateConfirmed: Boolean,
     val paidAt: Instant?,
 )
 

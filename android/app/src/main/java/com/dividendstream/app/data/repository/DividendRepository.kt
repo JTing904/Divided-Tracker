@@ -3,6 +3,7 @@ package com.dividendstream.app.data.repository
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.local.SnapshotCache
+import com.dividendstream.app.data.remote.ConfirmReceivedRequest
 import com.dividendstream.app.data.remote.DividendDto
 import com.dividendstream.app.data.remote.DividendHistoryDto
 import com.dividendstream.app.data.remote.DividendStreamApi
@@ -10,6 +11,7 @@ import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.UpcomingDividendsDto
 import com.dividendstream.app.data.remote.apiCall
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
 
 class DividendRepository(
     private val api: DividendStreamApi,
@@ -79,4 +81,14 @@ class DividendRepository(
     suspend fun history(): AppResult<DividendHistoryDto> = apiCall(json) { api.dividendHistory() }
 
     suspend fun detail(id: String): AppResult<DividendDto> = apiCall(json) { api.dividendDetail(id) }
+
+    /**
+     * Reports the day a dividend actually arrived.
+     *
+     * The one fact here no provider supplies. It settles this entitlement against a real date
+     * and, for the stock, becomes the evidence that lets every later payment date stop being a
+     * guess.
+     */
+    suspend fun confirmReceived(id: String, receivedOn: LocalDate): AppResult<DividendDto> =
+        apiCall(json) { api.confirmReceived(id, ConfirmReceivedRequest(receivedOn)) }
 }
