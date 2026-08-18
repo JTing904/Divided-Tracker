@@ -37,6 +37,7 @@ import com.dividendstream.app.core.Precision
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.core.formatFull
 import com.dividendstream.app.core.formatMoney
+import com.dividendstream.app.core.formatPrice
 import com.dividendstream.app.core.formatPercent
 import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.ui.components.AccrualProgressBar
@@ -128,7 +129,7 @@ fun HoldingDetailScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatTile(
                             "Avg price",
-                            holding.averagePrice.formatMoney(holding.currency, 4),
+                            holding.averagePrice.formatPrice(holding.currency),
                             Modifier.weight(1f),
                         )
                         StatTile(

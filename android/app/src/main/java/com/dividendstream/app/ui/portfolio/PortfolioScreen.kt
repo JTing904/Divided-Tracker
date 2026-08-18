@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.core.formatFull
 import com.dividendstream.app.core.formatMoney
+import com.dividendstream.app.core.formatPrice
 import com.dividendstream.app.core.formatPercent
 import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.data.remote.HoldingDto
@@ -224,7 +225,7 @@ private fun HoldingCard(holding: HoldingDto, onClick: () -> Unit, onDelete: () -
         Row(modifier = Modifier.fillMaxWidth()) {
             LabelledFigure(
                 "Avg price",
-                holding.averagePrice.formatMoney(holding.currency, 4),
+                holding.averagePrice.formatPrice(holding.currency),
                 Modifier.weight(1f),
             )
             LabelledFigure(

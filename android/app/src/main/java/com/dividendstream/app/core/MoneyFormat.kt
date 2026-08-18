@@ -18,6 +18,9 @@ object Precision {
 
     /** Per-second and per-minute rates: RM0.00002058. */
     const val RATE = 8
+
+    /** A price never needs more than the four decimals a holding stores. */
+    const val PRICE_MAX = 4
 }
 
 fun currencySymbol(code: String): String = when (code.uppercase()) {
@@ -47,6 +50,25 @@ fun BigDecimal.formatAmount(decimals: Int = Precision.AMOUNT, grouping: Boolean 
 /** e.g. `RM320.00`. */
 fun BigDecimal.formatMoney(currency: String, decimals: Int = Precision.AMOUNT): String =
     "${currencySymbol(currency)}${formatAmount(decimals)}"
+
+/**
+ * A price at two decimals -- which is how one is quoted, and typed -- but never at the cost of
+ * hiding a digit that is really there.
+ *
+ * An average cost is derived rather than typed: 100 at 10.00 plus 200 at 11.00 averages
+ * 10.6667, and flattening that to 10.67 would leave shares times price visibly disagreeing with
+ * the cost basis printed beside it. So trailing zeros go and everything else stays.
+ */
+fun BigDecimal.formatPrice(currency: String): String {
+    val decimals = stripTrailingZeros().scale().coerceIn(Precision.AMOUNT, Precision.PRICE_MAX)
+    return "${currencySymbol(currency)}${formatAmount(decimals)}"
+}
+
+/** The same trimming, unadorned, for prefilling an input the user is about to edit. */
+fun BigDecimal.toPriceInput(): String {
+    val decimals = stripTrailingZeros().scale().coerceIn(Precision.AMOUNT, Precision.PRICE_MAX)
+    return setScale(decimals, RoundingMode.HALF_UP).toPlainString()
+}
 
 /** Share counts drop meaningless trailing zeros: `1,000` rather than `1,000.0000`. */
 fun BigDecimal.formatShares(): String =

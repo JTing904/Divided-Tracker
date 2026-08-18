@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dividendstream.app.core.formatMoney
+import com.dividendstream.app.core.formatPrice
 import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.core.formatPercent
 import com.dividendstream.app.data.remote.HoldingDto
@@ -348,7 +349,7 @@ private fun TopUpSummary(held: HoldingDto, state: AddStockUiState) {
         Spacer(Modifier.height(6.dp))
         Text(
             "${held.quantity.formatShares()} shares at " +
-                held.averagePrice.formatMoney(held.currency, 4),
+                held.averagePrice.formatPrice(held.currency),
             style = MonoFigure,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -359,7 +360,7 @@ private fun TopUpSummary(held: HoldingDto, state: AddStockUiState) {
             Spacer(Modifier.height(6.dp))
             Text(
                 "${quantity.formatShares()} shares at " +
-                    averagePrice.formatMoney(held.currency, 4),
+                    averagePrice.formatPrice(held.currency),
                 style = MonoFigure,
                 color = MaterialTheme.colorScheme.primary,
             )

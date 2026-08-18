@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.dataOrNull
+import com.dividendstream.app.core.toPriceInput
 import com.dividendstream.app.data.remote.StockDetailDto
 import com.dividendstream.app.data.remote.HoldingDto
 import com.dividendstream.app.data.remote.StockSummaryDto
@@ -129,7 +130,7 @@ class AddStockViewModel(private val portfolioRepository: PortfolioRepository) : 
                 existing = heldPosition(stock),
                 results = emptyList(),
                 query = stock.companyName,
-                averagePrice = it.averagePrice.ifBlank { stock.lastPrice?.toPlainString().orEmpty() },
+                averagePrice = it.averagePrice.ifBlank { stock.lastPrice?.toPriceInput().orEmpty() },
             )
         }
 
