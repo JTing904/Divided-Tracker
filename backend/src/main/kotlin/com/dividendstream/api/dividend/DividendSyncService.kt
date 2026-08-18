@@ -2,6 +2,7 @@ package com.dividendstream.api.dividend
 
 import com.dividendstream.api.marketdata.MarketDataService
 import com.dividendstream.api.marketdata.ProviderDividend
+import com.dividendstream.api.marketdata.YahooDividendCalendar
 import com.dividendstream.api.stock.StockEntity
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -31,7 +32,11 @@ class DividendSyncService(
             log.warn("Dividend sync failed for {}: {}", stock.symbol, ex.message)
             return emptyList()
         }
-        val current = cycles.mapNotNull { upsert(stock, it) }
+        // Retime every estimate to what this issuer has actually been observed doing. The
+        // provider works from a fixed default lag because it knows nothing about this user's
+        // confirmations; they live here.
+        val retimed = retimeToObservedLag(stock, cycles)
+        val current = retimed.mapNotNull { upsert(stock, it) }
         reconcile(stock, current)
         return current
     }
@@ -72,6 +77,37 @@ class DividendSyncService(
 
     /** Records a cycle the user typed in themselves, for stocks the provider does not cover. */
     @Transactional
+    /**
+     * Re-estimates payment dates from the lag this issuer has actually shown.
+     *
+     * Cycles whose real date somebody confirmed are left exactly where they are: an observation
+     * is not something to re-estimate. Everything else moves onto the observed median, so one
+     * confirmation improves the dates of every cycle that is still a guess -- including the
+     * projected one the live counter runs against.
+     */
+    private fun retimeToObservedLag(
+        stock: StockEntity,
+        cycles: List<ProviderDividend>,
+    ): List<ProviderDividend> {
+        val confirmed = dividendRepository.findConfirmedForStock(stock.id)
+        val lag = PaymentLag.infer(
+            confirmed.mapNotNull { cycle ->
+                cycle.actualPaymentDate?.let { PaymentLag.Observation(cycle.exDate, it) }
+            },
+        ) ?: return cycles
+
+        val known = confirmed.associate { it.exDate to it.actualPaymentDate }
+
+        return cycles.map { cycle ->
+            val actual = known[cycle.exDate]
+            if (actual != null) {
+                cycle.copy(paymentDate = actual)
+            } else {
+                cycle.copy(paymentDate = YahooDividendCalendar.estimatePaymentDate(cycle.exDate, lag))
+            }
+        }
+    }
+
     fun recordManualDividend(stock: StockEntity, cycle: ProviderDividend): DividendEntity =
         upsert(stock, cycle, source = MANUAL_SOURCE)
             ?: error("Manual dividend could not be stored")
@@ -89,9 +125,20 @@ class DividendSyncService(
             return null
         }
 
-        val entity = dividendRepository
-            .findByStockIdAndExDateAndPaymentDate(stock.id, cycle.exDate, cycle.paymentDate)
-            .orElseGet { DividendEntity(stock = stock, exDate = cycle.exDate, paymentDate = cycle.paymentDate) }
+        // Matched on the ex-date, which is what identifies a cycle. Including the payment date
+        // was safe only while it never changed; now that a better estimate can replace an older
+        // one, it would file the revision as a second dividend and show the stock paying twice.
+        // A manual row is the user's own and is matched exactly, so a sync never claims it.
+        val entity = if (source == MANUAL_SOURCE) {
+            dividendRepository
+                .findByStockIdAndExDateAndPaymentDate(stock.id, cycle.exDate, cycle.paymentDate)
+                .orElseGet { DividendEntity(stock = stock, exDate = cycle.exDate, paymentDate = cycle.paymentDate) }
+        } else {
+            dividendRepository.findProviderCycles(stock.id, cycle.exDate).firstOrNull()
+                ?: DividendEntity(stock = stock, exDate = cycle.exDate, paymentDate = cycle.paymentDate)
+        }
+
+        entity.paymentDate = cycle.paymentDate
 
         entity.dividendPerShare = cycle.dividendPerShare
         entity.currency = cycle.currency

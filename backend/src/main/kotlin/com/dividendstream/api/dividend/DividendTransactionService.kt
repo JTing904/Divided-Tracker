@@ -1,5 +1,7 @@
 package com.dividendstream.api.dividend
 
+import com.dividendstream.api.common.InvalidRequestException
+import com.dividendstream.api.common.NotFoundException
 import com.dividendstream.api.config.DividendProperties
 import com.dividendstream.api.portfolio.HoldingEntity
 import com.dividendstream.api.portfolio.HoldingRepository
@@ -161,6 +163,42 @@ class DividendTransactionService(
     }
 
     /**
+     * Records the day the money genuinely arrived, for a dividend the caller holds.
+     *
+     * Two things follow, and they are worth separating. For this holder it settles the
+     * entitlement against a real date instead of the estimated one, so received income stops
+     * being "the date we guessed has passed, so presumably". For the stock it is evidence: the
+     * issuer paid that many days after the shares went ex, and every later estimate for it can
+     * stop guessing. That is why the date is stored on the shared cycle -- the company paid on
+     * that day for everyone who held the shares, not only for whoever happened to report it.
+     */
+    @Transactional
+    fun confirmReceived(userId: UUID, transactionId: UUID, receivedOn: LocalDate) {
+        val transaction = transactionRepository.findByIdAndUserId(transactionId, userId)
+            .orElseThrow { NotFoundException("That dividend is not in your portfolio.") }
+
+        val dividend = dividendRepository.findById(transaction.dividendId)
+            .orElseThrow { NotFoundException("That dividend is no longer available.") }
+
+        if (!receivedOn.isAfter(dividend.exDate)) {
+            throw InvalidRequestException(
+                "A payment cannot arrive before the shares go ex-dividend on ${dividend.exDate}.",
+            )
+        }
+        if (receivedOn.isAfter(LocalDate.now(clock))) {
+            throw InvalidRequestException("That date is in the future.")
+        }
+
+        dividend.actualPaymentDate = receivedOn
+        dividendRepository.save(dividend)
+
+        transaction.status = DividendStatus.PAID
+        transaction.paidAmount = transaction.expectedAmount
+        transaction.paidAt = receivedOn.atStartOfDay(ZoneOffset.UTC).toInstant()
+        transactionRepository.save(transaction)
+    }
+
+    /**
      * Records settlement. [DividendTransactionEntity.paidAmount] is copied from the expected
      * amount because that is all the provider gives us; once a broker feed exists it must be
      * the actual credited figure instead. Estimated and received stay distinct fields either
@@ -170,6 +208,9 @@ class DividendTransactionService(
         if (transaction.status != DividendStatus.PAYABLE) return false
         transaction.status = DividendStatus.PAID
         transaction.paidAmount = transaction.expectedAmount
+        // The estimated payment date, because that is all there is until somebody confirms the
+        // real one through confirmReceived. Kept distinct in the response so the difference
+        // between "the date we estimated has passed" and "the money arrived" stays visible.
         transaction.paidAt = transaction.accumulationEnd
         return true
     }

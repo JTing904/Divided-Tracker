@@ -71,6 +71,16 @@ class DividendEntity(
     @Column(name = "payment_date", nullable = false)
     var paymentDate: LocalDate = LocalDate.EPOCH,
 
+    /**
+     * When the money genuinely arrived, as reported by someone it arrived for.
+     *
+     * Null while [paymentDate] is still only an estimate. Once set it is both the truth for
+     * this cycle and, with its siblings, the evidence for estimating the next one -- which is
+     * the only way out of guessing, since no free source publishes Bursa payment dates.
+     */
+    @Column(name = "actual_payment_date")
+    var actualPaymentDate: LocalDate? = null,
+
     /** Which provider supplied this row, e.g. `mock`. */
     @Column(name = "source", nullable = false, length = 32)
     var source: String = "mock",

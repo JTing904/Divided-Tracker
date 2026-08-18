@@ -2,6 +2,8 @@ package com.dividendstream.api.dividend
 
 import java.math.BigDecimal
 import java.time.Instant
+import jakarta.validation.constraints.NotNull
+import jakarta.validation.constraints.PastOrPresent
 import java.time.LocalDate
 import java.util.UUID
 
@@ -111,4 +113,11 @@ data class DividendHistoryResponse(
     val receivedThisMonth: BigDecimal,
     val months: List<MonthlyDividendGroup>,
     val byStock: List<StockDividendTotal>,
+)
+
+/** The one fact about a dividend that only the person who received it can supply. */
+data class ConfirmReceivedRequest(
+    @field:NotNull(message = "The date you received it is required")
+    @field:PastOrPresent(message = "That date is in the future")
+    val receivedOn: LocalDate,
 )

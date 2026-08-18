@@ -22,8 +22,13 @@ import java.util.UUID
 class LiveDividendService(
     private val transactionRepository: DividendTransactionRepository,
     private val dividendRepository: DividendRepository,
+    private val transactionService: DividendTransactionService,
     private val clock: Clock,
 ) {
+
+    /** Delegates; the controller talks to one service for everything dividend-shaped. */
+    fun confirmReceived(userId: UUID, transactionId: UUID, receivedOn: java.time.LocalDate) =
+        transactionService.confirmReceived(userId, transactionId, receivedOn)
 
     @Transactional(readOnly = true)
     fun live(userId: UUID): LiveDividendResponse {

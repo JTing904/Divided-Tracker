@@ -13,6 +13,34 @@ interface DividendRepository : JpaRepository<DividendEntity, UUID> {
     @EntityGraph(attributePaths = ["stock"])
     fun findAllByStockIdOrderByPaymentDateDesc(stockId: UUID): List<DividendEntity>
 
+    /**
+     * A provider cycle is identified by its ex-date, not by the payment date it was last
+     * estimated at -- otherwise a revised estimate is filed as a second dividend. Manual rows
+     * are excluded: those are the user's own and are matched exactly.
+     */
+    /**
+     * Returns a list rather than a single row because a database predating the ex-date keying
+     * may already hold two for the same cycle. Reconcile removes whichever this sync did not
+     * touch; demanding one result would instead throw and leave the stock unsyncable until
+     * somebody cleaned up by hand.
+     */
+    @Query(
+        "SELECT d FROM DividendEntity d " +
+            "WHERE d.stock.id = :stockId AND d.exDate = :exDate AND d.source <> 'manual' " +
+            "ORDER BY d.updatedAt DESC, d.id ASC",
+    )
+    fun findProviderCycles(
+        @Param("stockId") stockId: UUID,
+        @Param("exDate") exDate: LocalDate,
+    ): List<DividendEntity>
+
+    /** Cycles for a stock whose real payment date somebody has confirmed. */
+    @Query(
+        "SELECT d FROM DividendEntity d " +
+            "WHERE d.stock.id = :stockId AND d.actualPaymentDate IS NOT NULL",
+    )
+    fun findConfirmedForStock(@Param("stockId") stockId: UUID): List<DividendEntity>
+
     fun findByStockIdAndExDateAndPaymentDate(
         stockId: UUID,
         exDate: LocalDate,
