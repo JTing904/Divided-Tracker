@@ -216,6 +216,78 @@ class VerticalSliceIntegrationTest {
         assertThat(portfolio["totalCostBasis"].asText()).isEqualTo("15000.00")
     }
 
+    @Test
+    @DisplayName("the same purchase sent twice is applied once")
+    fun `idempotency key makes a repeat harmless`() {
+        val token = register("queued@example.com")
+        val key = java.util.UUID.randomUUID().toString()
+        val body = """{"idempotencyKey":"$key","symbol":"1155","quantity":"1000","averagePrice":"9.50"}"""
+
+        // What a queued purchase does when the reply is lost: send it again, unchanged.
+        repeat(2) {
+            mockMvc.perform(
+                post("/api/portfolio")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body),
+            ).andExpect(status().is2xxSuccessful)
+        }
+
+        // Not two thousand shares, and not two holdings.
+        val portfolio = getJson("/api/portfolio", token)
+        assertThat(portfolio["holdings"]).hasSize(1)
+        assertThat(portfolio["holdings"][0]["quantity"].asText()).isEqualTo("1000.0000")
+        assertThat(portfolio["totalCostBasis"].asText()).isEqualTo("9500.00")
+    }
+
+    @Test
+    @DisplayName("a different key is a different purchase, and does add again")
+    fun `distinct keys both apply`() {
+        val token = register("twobuys@example.com")
+
+        listOf(java.util.UUID.randomUUID(), java.util.UUID.randomUUID()).forEach { key ->
+            mockMvc.perform(
+                post("/api/portfolio")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"idempotencyKey":"$key","symbol":"1155","quantity":"500","averagePrice":"10.00"}"""),
+            ).andExpect(status().is2xxSuccessful)
+        }
+
+        // The guard must not swallow a genuine second purchase of the same stock.
+        val portfolio = getJson("/api/portfolio", token)
+        assertThat(portfolio["holdings"]).hasSize(1)
+        assertThat(portfolio["holdings"][0]["quantity"].asText()).isEqualTo("1000.0000")
+    }
+
+    @Test
+    @DisplayName("one user's key cannot resolve to another user's holding")
+    fun `keys are scoped to the user`() {
+        val mine = register("mine@example.com")
+        val theirs = register("theirs@example.com")
+        val key = java.util.UUID.randomUUID().toString()
+
+        mockMvc.perform(
+            post("/api/portfolio")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $mine")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"idempotencyKey":"$key","symbol":"1155","quantity":"1000","averagePrice":"9.50"}"""),
+        ).andExpect(status().is2xxSuccessful)
+
+        // The same key from somebody else is a new purchase in their own portfolio, never a
+        // window onto the first one's.
+        mockMvc.perform(
+            post("/api/portfolio")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $theirs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"idempotencyKey":"$key","symbol":"1295","quantity":"200","averagePrice":"4.00"}"""),
+        ).andExpect(status().is2xxSuccessful)
+
+        val theirPortfolio = getJson("/api/portfolio", theirs)
+        assertThat(theirPortfolio["holdings"]).hasSize(1)
+        assertThat(theirPortfolio["holdings"][0]["symbol"].asText()).isEqualTo("1295")
+    }
+
     // --- helpers -----------------------------------------------------------------
 
     private fun register(email: String): String {

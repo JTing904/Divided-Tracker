@@ -13,6 +13,14 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class CreateHoldingRequest(
+    /**
+     * The client's own name for this purchase, so sending it twice buys the shares once.
+     *
+     * Optional, because a client that never queues has no need of one; supplying it is what
+     * makes a retry safe, and a queued purchase always does.
+     */
+    val idempotencyKey: UUID? = null,
+
     @field:NotBlank(message = "Stock symbol is required")
     @field:Size(max = 32, message = "Stock symbol is too long")
     val symbol: String,

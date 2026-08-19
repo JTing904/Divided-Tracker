@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -27,6 +28,7 @@ class PortfolioService(
     private val stockService: StockService,
     private val dividendSyncService: DividendSyncService,
     private val dividendTransactionService: DividendTransactionService,
+    private val purchaseIntentRepository: PurchaseIntentRepository,
     private val clock: Clock,
 ) {
 
@@ -71,6 +73,18 @@ class PortfolioService(
 
     @Transactional
     fun addHolding(userId: UUID, request: CreateHoldingRequest): HoldingResponse {
+        // Answered before anything is bought. A queued purchase is retried until a reply
+        // arrives, and a reply can be lost after the work is done, so whether this already
+        // happened has to be decided from the request rather than from what the client heard.
+        val alreadyDone = request.idempotencyKey?.let { key ->
+            purchaseIntentRepository.findByIdempotencyKeyAndUserId(key, userId).orElse(null)
+        }
+        if (alreadyDone != null) {
+            val holding = holdingRepository.findByIdAndUserId(alreadyDone.holdingId, userId)
+                .orElseThrow { NotFoundException("That holding is no longer in your portfolio.") }
+            return describe(userId, holding)
+        }
+
         val stock = stockService.importBySymbol(request.symbol)
 
         val existing = holdingRepository.findByUserIdAndStockId(userId, stock.id).orElse(null)
@@ -124,6 +138,19 @@ class PortfolioService(
         // The expected dividend and the per-second rate are both derived from the share count,
         // so a purchase has to re-derive them or the counter keeps running at the old size.
         dividendTransactionService.syncHolding(holding)
+
+        // Recorded in the same transaction as the purchase: either both happen or neither does,
+        // so there is never a moment where the shares are bought but the repeat guard is not.
+        request.idempotencyKey?.let { key ->
+            purchaseIntentRepository.save(
+                PurchaseIntentEntity(
+                    idempotencyKey = key,
+                    userId = userId,
+                    holdingId = holding.id,
+                    createdAt = Instant.now(clock),
+                ),
+            )
+        }
 
         return describe(userId, holding)
     }
