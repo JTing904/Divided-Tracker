@@ -40,8 +40,14 @@ object AppViewModelProvider {
                 container.serverClock,
             )
         }
-        initializer { PortfolioViewModel(container.portfolioRepository) }
-        initializer { AddStockViewModel(container.portfolioRepository, container.serverAvailability) }
+        initializer { PortfolioViewModel(container.portfolioRepository, container.purchaseQueue) }
+        initializer {
+            AddStockViewModel(
+                container.portfolioRepository,
+                container.purchaseQueue,
+                container.serverAvailability,
+            )
+        }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
     }

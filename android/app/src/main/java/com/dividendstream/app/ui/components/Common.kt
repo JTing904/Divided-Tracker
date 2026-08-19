@@ -396,6 +396,80 @@ fun ServerWakingBanner(
     }
 }
 
+/**
+ * A purchase entered but not yet accepted by the server.
+ *
+ * Shown beside the holdings rather than added into them. The figures on that screen are the
+ * ones the server has confirmed, and a queued purchase that turns out to be refused must never
+ * have moved them -- a cost basis that has to be walked back is worse than one that arrives a
+ * minute late.
+ */
+@Composable
+fun PendingPurchaseRow(
+    companyName: String,
+    detail: String,
+    failure: String?,
+    onRetry: () -> Unit,
+    onDiscard: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DsCard(
+        modifier = modifier.fillMaxWidth(),
+        border = BorderStroke(
+            1.dp,
+            if (failure == null) MaterialTheme.colorScheme.outline else DividendColors.Warning,
+        ),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (failure == null) Icons.Default.CloudSync else Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = if (failure == null) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    DividendColors.Warning
+                },
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    companyName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    detail,
+                    style = MonoFigure,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        if (failure == null) {
+            Text(
+                "Waiting to send. It will go through on its own - you can close the app.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                failure,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Row {
+                TextButton(onClick = onRetry) { Text("Try again") }
+                TextButton(onClick = onDiscard) { Text("Discard") }
+            }
+        }
+    }
+}
+
 @Composable
 fun EmptyState(
     title: String,

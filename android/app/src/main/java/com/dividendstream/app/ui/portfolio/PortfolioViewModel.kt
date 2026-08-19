@@ -6,8 +6,11 @@ import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.data.remote.PortfolioDto
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.PurchaseQueue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -27,10 +30,29 @@ data class PortfolioUiState(
     val isEmpty: Boolean get() = portfolio != null && portfolio.holdings.isEmpty()
 }
 
-class PortfolioViewModel(private val portfolioRepository: PortfolioRepository) : ViewModel() {
+class PortfolioViewModel(
+    private val portfolioRepository: PortfolioRepository,
+    private val purchaseQueue: PurchaseQueue,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(PortfolioUiState())
     val state = _state.asStateFlow()
+
+    /**
+     * Purchases entered but not yet accepted, shown apart from the holdings rather than folded
+     * into them. The figures on this screen are the ones the server has confirmed; a queued
+     * purchase that turns out to be refused must never have moved them.
+     */
+    val pending = purchaseQueue.pending
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun discardPending(idempotencyKey: String) {
+        viewModelScope.launch { purchaseQueue.discard(idempotencyKey) }
+    }
+
+    fun retryPending(idempotencyKey: String) {
+        viewModelScope.launch { purchaseQueue.retry(idempotencyKey) }
+    }
 
     init {
         refresh()

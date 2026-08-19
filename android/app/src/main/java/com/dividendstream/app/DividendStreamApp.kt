@@ -2,6 +2,7 @@ package com.dividendstream.app
 
 import android.app.Application
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
 import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.NetworkModule
@@ -9,6 +10,10 @@ import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.PurchaseQueue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Manual dependency container.
@@ -38,6 +43,20 @@ class AppContainer(application: Application) {
 
     /** Whether the server is answering. Fed by real traffic; read by screens that need it up. */
     val serverAvailability = network.serverAvailability
+
+    private val pendingPurchaseStore = PendingPurchaseStore(application, network.json)
+
+    /**
+     * Purchases live here between being entered and being accepted. Its own scope, because it
+     * has to outlive whichever screen queued the purchase -- the point is that the person can
+     * leave.
+     */
+    val purchaseQueue = PurchaseQueue(
+        store = pendingPurchaseStore,
+        portfolioRepository = portfolioRepository,
+        availability = serverAvailability,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
 }
 
 class DividendStreamApp : Application() {

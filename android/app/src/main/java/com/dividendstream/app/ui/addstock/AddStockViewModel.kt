@@ -11,6 +11,7 @@ import com.dividendstream.app.data.remote.HoldingDto
 import com.dividendstream.app.data.remote.ServerAvailability
 import com.dividendstream.app.data.remote.StockSummaryDto
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.PurchaseQueue
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,7 +86,8 @@ private fun String.toBigDecimalOrNullSafe(): BigDecimal? =
 
 class AddStockViewModel(
     private val portfolioRepository: PortfolioRepository,
-    /** Searching and saving both need a live server; the screen says so rather than spinning. */
+    private val purchaseQueue: PurchaseQueue,
+    /** Searching needs a live server; the screen says so rather than spinning. */
     val serverAvailability: ServerAvailability,
 ) : ViewModel() {
 
@@ -159,6 +161,14 @@ class AddStockViewModel(
 
     fun onAveragePriceChange(value: String) = _state.update { it.copy(averagePrice = value, error = null) }
 
+    /**
+     * Hands the purchase to the queue and returns.
+     *
+     * Always queued, never sent directly, even when the server is plainly up: one path is
+     * easier to trust than two, and the second would be chosen by guessing at something only
+     * the network knows. The queue sends it immediately if it can, and keeps it safe on the
+     * device if it cannot, so pressing save is done either way.
+     */
     fun submit() {
         val current = _state.value
         val stock = current.selected ?: return
@@ -167,13 +177,13 @@ class AddStockViewModel(
 
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true, error = null) }
-            when (val result = portfolioRepository.addHolding(stock.symbol, quantity, averagePrice)) {
-                is AppResult.Success -> _state.update {
-                    it.copy(isSubmitting = false, savedHoldingSymbol = result.data.symbol)
-                }
-
-                is AppResult.Failure -> _state.update { it.copy(isSubmitting = false, error = result.error) }
-            }
+            purchaseQueue.submit(
+                symbol = stock.symbol,
+                companyName = stock.companyName,
+                quantity = quantity,
+                averagePrice = averagePrice,
+            )
+            _state.update { it.copy(isSubmitting = false, savedHoldingSymbol = stock.symbol) }
         }
     }
 

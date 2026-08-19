@@ -60,13 +60,26 @@ class PortfolioRepository(
     suspend fun stockDetail(symbol: String): AppResult<StockDetailDto> =
         apiCall(json) { api.stockDetail(symbol) }
 
+    /**
+     * [idempotencyKey] is what makes this safe to send again after a lost reply. Callers that
+     * retry -- which is all of them, via PurchaseQueue -- must pass the same one every time.
+     */
     suspend fun addHolding(
         symbol: String,
         quantity: BigDecimal,
         averagePrice: BigDecimal,
         manualDividend: ManualDividendRequest? = null,
+        idempotencyKey: String? = null,
     ): AppResult<HoldingDto> = apiCall(json) {
-        api.addHolding(CreateHoldingRequest(symbol, quantity, averagePrice, manualDividend))
+        api.addHolding(
+            CreateHoldingRequest(
+                idempotencyKey = idempotencyKey,
+                symbol = symbol,
+                quantity = quantity,
+                averagePrice = averagePrice,
+                manualDividend = manualDividend,
+            ),
+        )
     }
 
     suspend fun updateHolding(

@@ -1,6 +1,7 @@
 package com.dividendstream.app
 
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
 import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.NetworkModule
@@ -8,6 +9,10 @@ import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.PurchaseQueue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Manual dependency container, desktop edition.
@@ -36,4 +41,14 @@ class AppContainer {
 
     /** Whether the server is answering. Fed by real traffic; read by screens that need it up. */
     val serverAvailability = network.serverAvailability
+
+    private val pendingPurchaseStore = PendingPurchaseStore(network.json)
+
+    /** See the Android container: the queue outlives the screen that filled it. */
+    val purchaseQueue = PurchaseQueue(
+        store = pendingPurchaseStore,
+        portfolioRepository = portfolioRepository,
+        availability = serverAvailability,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
 }

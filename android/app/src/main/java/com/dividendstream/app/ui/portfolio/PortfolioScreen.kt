@@ -44,6 +44,7 @@ import com.dividendstream.app.ui.components.LoadingBox
 import com.dividendstream.app.ui.components.OverlineText
 import com.dividendstream.app.ui.components.PrimaryButton
 import com.dividendstream.app.ui.components.SectionHeader
+import com.dividendstream.app.ui.components.PendingPurchaseRow
 import com.dividendstream.app.ui.components.StaleDataBanner
 import com.dividendstream.app.ui.components.StatTile
 import com.dividendstream.app.ui.theme.MonoFigure
@@ -59,6 +60,7 @@ fun PortfolioScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pending by viewModel.pending.collectAsStateWithLifecycle()
     val portfolio = state.portfolio
     var pendingDelete by remember { mutableStateOf<HoldingDto?>(null) }
 
@@ -103,6 +105,17 @@ fun PortfolioScreen(
                         reason = state.staleError,
                     )
                 }
+            }
+
+            items(pending, key = { it.idempotencyKey }) { purchase ->
+                PendingPurchaseRow(
+                    companyName = purchase.companyName,
+                    detail = "${purchase.quantity.formatShares()} shares at " +
+                        purchase.averagePrice.formatPrice(state.portfolio?.currency ?: "MYR"),
+                    failure = purchase.failure,
+                    onRetry = { viewModel.retryPending(purchase.idempotencyKey) },
+                    onDiscard = { viewModel.discardPending(purchase.idempotencyKey) },
+                )
             }
 
             item { PortfolioSummary(portfolio) }

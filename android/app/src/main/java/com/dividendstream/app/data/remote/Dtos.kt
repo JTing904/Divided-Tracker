@@ -102,6 +102,8 @@ data class ManualDividendRequest(
 
 @Serializable
 data class CreateHoldingRequest(
+    /** Names this purchase so sending it twice buys the shares once. */
+    val idempotencyKey: String? = null,
     val symbol: String,
     val quantity: BigDecimal,
     val averagePrice: BigDecimal,
