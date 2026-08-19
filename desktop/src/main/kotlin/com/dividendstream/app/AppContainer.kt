@@ -33,4 +33,7 @@ class AppContainer {
     val portfolioRepository = PortfolioRepository(network.api, snapshotCache, network.json)
     val dividendRepository = DividendRepository(network.api, snapshotCache, serverClock, network.json)
     val appInfoRepository = AppInfoRepository(network.api, network.json, BuildConfig.VERSION_NAME)
+
+    /** Whether the server is answering. Fed by real traffic; read by screens that need it up. */
+    val serverAvailability = network.serverAvailability
 }

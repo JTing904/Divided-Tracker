@@ -35,6 +35,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,18 +45,23 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import com.dividendstream.app.core.formatMoney
 import com.dividendstream.app.core.formatPrice
 import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.core.formatPercent
 import com.dividendstream.app.data.remote.HoldingDto
+import com.dividendstream.app.data.remote.ServerAvailability
 import com.dividendstream.app.data.remote.StockSummaryDto
 import com.dividendstream.app.ui.components.DsCard
 import com.dividendstream.app.ui.components.DsTextField
 import com.dividendstream.app.ui.components.ErrorBanner
 import com.dividendstream.app.ui.components.OverlineText
 import com.dividendstream.app.ui.components.PrimaryButton
+import com.dividendstream.app.ui.components.ServerWakingBanner
 import com.dividendstream.app.ui.theme.MonoFigure
+import java.time.Duration
+import java.time.Instant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +72,17 @@ fun AddStockScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val availability by viewModel.serverAvailability.status.collectAsStateWithLifecycle()
+
+    // Ticks so the elapsed figure moves; a countdown that never changes reads as frozen.
+    val waking = availability as? ServerAvailability.Status.Waking
+    var elapsed by remember(waking) { mutableStateOf(0L) }
+    LaunchedEffect(waking) {
+        while (waking != null) {
+            elapsed = Duration.between(waking.since, Instant.now()).seconds.coerceAtLeast(0)
+            delay(1_000)
+        }
+    }
 
     LaunchedEffect(state.savedHoldingSymbol) {
         if (state.savedHoldingSymbol != null) {
@@ -129,6 +148,13 @@ fun AddStockScreen(
 
             state.results.forEach { result ->
                 SearchResultCard(result, onSelect = { viewModel.onSelect(result) })
+            }
+
+            if (waking != null) {
+                ServerWakingBanner(
+                    elapsedSeconds = elapsed,
+                    typicalSeconds = ServerAvailability.TYPICAL_WAKE_SECONDS,
+                )
             }
 
             state.selected?.let { selected ->

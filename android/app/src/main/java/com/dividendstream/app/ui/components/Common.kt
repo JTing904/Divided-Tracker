@@ -340,6 +340,62 @@ fun LabelledDivider(label: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Explains a wait that a spinner would misrepresent.
+ *
+ * Cached figures cover the screens that only display. Searching for a stock or recording a
+ * purchase cannot be served from a cache -- they need a server that is running -- so when the
+ * server is still starting, the honest thing is to say so and roughly how long, rather than
+ * turn a circle until the person decides the app is broken.
+ *
+ * The elapsed count is real, taken from when the first request timed out. The estimate beside
+ * it is this deployment's measured cold start, and it is called an estimate because it is one.
+ */
+@Composable
+fun ServerWakingBanner(
+    elapsedSeconds: Long,
+    typicalSeconds: Long,
+    modifier: Modifier = Modifier,
+) {
+    val remaining = (typicalSeconds - elapsedSeconds).coerceAtLeast(0)
+    val message = if (remaining > 0) {
+        "Waking the server - about ${remaining}s left. It sleeps when unused, and only the " +
+            "first request after that has to wait."
+    } else {
+        "Waking the server - taking longer than usual (${elapsedSeconds}s). It should not be " +
+            "much longer."
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.CloudSync,
+                contentDescription = null,
+                tint = DividendColors.Warning,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        LinearProgressIndicator(
+            progress = { (elapsedSeconds.toFloat() / typicalSeconds).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+            color = DividendColors.Warning,
+            trackColor = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
 @Composable
 fun EmptyState(
     title: String,

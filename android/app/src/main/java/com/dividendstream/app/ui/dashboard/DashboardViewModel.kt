@@ -55,6 +55,13 @@ class DashboardViewModel(
     /**
      * Asked once per launch, and never surfaced as an error. An update notice is the least
      * urgent thing on the screen, so if the backend cannot answer, the user hears nothing.
+     *
+     * It has a second job that is not incidental and must not be removed with it: this is the
+     * request that wakes a sleeping server, and it goes out the moment the app opens. Whatever
+     * the person does next -- reading the dashboard, looking for a stock -- happens while the
+     * container is already starting instead of afterwards. It is deliberately the version
+     * endpoint, which touches no database and needs no session, so it is the cheapest thing
+     * that can possibly do the waking.
      */
     private fun checkForUpdate() {
         viewModelScope.launch {

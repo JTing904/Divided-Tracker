@@ -8,6 +8,7 @@ import com.dividendstream.app.core.dataOrNull
 import com.dividendstream.app.core.toPriceInput
 import com.dividendstream.app.data.remote.StockDetailDto
 import com.dividendstream.app.data.remote.HoldingDto
+import com.dividendstream.app.data.remote.ServerAvailability
 import com.dividendstream.app.data.remote.StockSummaryDto
 import com.dividendstream.app.data.repository.PortfolioRepository
 import kotlinx.coroutines.Job
@@ -82,7 +83,11 @@ data class AddStockUiState(
 private fun String.toBigDecimalOrNullSafe(): BigDecimal? =
     trim().replace(",", "").takeIf { it.isNotEmpty() }?.let { runCatching { BigDecimal(it) }.getOrNull() }
 
-class AddStockViewModel(private val portfolioRepository: PortfolioRepository) : ViewModel() {
+class AddStockViewModel(
+    private val portfolioRepository: PortfolioRepository,
+    /** Searching and saving both need a live server; the screen says so rather than spinning. */
+    val serverAvailability: ServerAvailability,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(AddStockUiState())
     val state = _state.asStateFlow()

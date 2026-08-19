@@ -16,6 +16,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import java.io.InterruptedIOException
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 /**
@@ -27,7 +28,11 @@ class NetworkModule(
     baseUrl: String,
     sessionStore: SessionStore,
     isDebug: Boolean,
+    /** Told what the network is seeing, so screens can explain a wait instead of spinning. */
+    private val availability: ServerAvailability = ServerAvailability(),
 ) {
+
+    val serverAvailability: ServerAvailability get() = availability
 
     val json: Json = Json {
         ignoreUnknownKeys = true
@@ -57,7 +62,7 @@ class NetworkModule(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
-        .addInterceptor(ColdStartInterceptor())
+        .addInterceptor(ColdStartInterceptor(availability))
         .addInterceptor(BearerTokenInterceptor(sessionStore))
         .authenticator(TokenRefreshAuthenticator(sessionStore, refreshApi))
         .apply {
@@ -93,18 +98,24 @@ class NetworkModule(
  * This does not pretend to cover a cold start of any length; a boot slower than the budget
  * below still fails. It fails having said something true, which is the part that matters.
  */
-private class ColdStartInterceptor : Interceptor {
+private class ColdStartInterceptor(private val availability: ServerAvailability) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
 
         return try {
-            chain.proceed(request)
+            chain.proceed(request).also { availability.reportAwake() }
         } catch (timeout: InterruptedIOException) {
+            // Reaching the host and getting no answer is what a sleeping container looks like.
+            // Recorded before the retry, so a screen can start explaining the wait immediately
+            // rather than only once the second attempt has also run out.
+            availability.reportWaking(Instant.now())
+
             if (request.method !in IDEMPOTENT) throw timeout
 
             chain.withReadTimeout(COLD_START_READ_SECONDS, TimeUnit.SECONDS)
                 .proceed(request)
+                .also { availability.reportAwake() }
         }
     }
 

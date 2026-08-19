@@ -47,7 +47,7 @@ object AppViewModelProvider {
             )
         }
         initializer { PortfolioViewModel(container.portfolioRepository) }
-        initializer { AddStockViewModel(container.portfolioRepository) }
+        initializer { AddStockViewModel(container.portfolioRepository, container.serverAvailability) }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
     }
