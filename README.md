@@ -243,6 +243,7 @@ provider by implementing the interface and setting `MARKET_DATA_PROVIDER`.
 | `GET /api/dividends/upcoming` · `history` · `{id}` | |
 | `GET /api/ledger` | the whole ledger screen: live rate, funds, this month's records |
 | `POST`/`DELETE /api/ledger/flows` · `entries` · `funds` | saves carry a client id, so a resend records once |
+| `POST /api/ledger/funds/{id}/movements` · `DELETE /api/ledger/movements/{id}` | spending from a fund, and putting extra in |
 | `GET /api/app/version` | running build, current client release; unauthenticated, no database |
 
 Every user-scoped query is filtered by the user id in the JWT, never by a path parameter, so
@@ -260,8 +261,17 @@ the per-second rate is derived, and nothing is ever written per second. Income m
 is the figure on screen, and it counts *downwards* in a month where the outgoings win.
 
 What is left over can be split into **funds** by percentage — an emergency pot, a trip, an
-investment — each filling in real time. A share rather than a fixed figure, so a fund keeps up
-when a salary changes. Nothing is allocated out of a deficit.
+investment. Setting a share is an instruction, not a reminder: a fund fills itself, second by
+second, and carries what it collected into the next month rather than resetting. Spending from
+it comes off the balance, and taking out more than is there is refused with the figure that is
+actually available. Nothing is ever allocated out of a deficit.
+
+A fund's accumulated share is derived on read, from the flows and their start and end dates,
+rather than banked by a monthly job — a free-tier server that sleeps would miss the job, and a
+fund that quietly stopped filling is worse than one that recomputes. The cost is that a past
+month is worked out from the flows as they stand today, so a raise entered now is applied
+backwards. Storing a total per month is the fix, and is worth doing once anyone has a year of
+them.
 
 Two kinds of number live on that screen and are never added together:
 

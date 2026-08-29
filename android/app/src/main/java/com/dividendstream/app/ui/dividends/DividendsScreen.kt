@@ -16,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.ui.calendar.CalendarScreen
 import com.dividendstream.app.ui.calendar.CalendarViewModel
 import com.dividendstream.app.ui.dashboard.DashboardScreen
@@ -45,7 +44,6 @@ fun DividendsScreen(
     dashboardViewModel: DashboardViewModel,
     calendarViewModel: CalendarViewModel,
     historyViewModel: HistoryViewModel,
-    serverClock: ServerClock,
     userName: String,
     onAddStock: () -> Unit,
     onOpenStock: (String) -> Unit,

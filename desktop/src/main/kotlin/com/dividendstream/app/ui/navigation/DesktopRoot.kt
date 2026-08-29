@@ -234,8 +234,7 @@ private fun SignedInApp(
                             dashboardViewModel = dashboard,
                             calendarViewModel = calendar,
                             historyViewModel = history,
-                            serverClock = container.serverClock,
-                            userName = userName,
+                                userName = userName,
                             onAddStock = { navigator.push(Destination.AddStock) },
                             onOpenStock = { navigator.push(Destination.Detail(it)) },
                         )
@@ -251,7 +250,6 @@ private fun SignedInApp(
                             onOpenStock = { navigator.push(Destination.Detail(it)) },
                         )
                     }
-
 
                     Destination.Ledger -> {
                         val viewModel: LedgerViewModel = viewModel(factory = factory)

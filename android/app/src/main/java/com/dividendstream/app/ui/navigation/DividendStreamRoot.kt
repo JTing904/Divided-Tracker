@@ -221,7 +221,6 @@ private fun SignedInApp(
                         dashboardViewModel = dashboard,
                         calendarViewModel = calendar,
                         historyViewModel = history,
-                        serverClock = container.serverClock,
                         userName = userName,
                         onAddStock = { navController.navigate(Routes.ADD_STOCK) },
                         onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
