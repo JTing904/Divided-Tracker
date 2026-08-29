@@ -98,5 +98,11 @@ dividend-stream:
   dividends:
     backfill-settled-cycles: ${DIVIDEND_BACKFILL:true}
     backfill-window-days: 400
+  ledger:
+    # Where the month turns over. Everything else in this app is UTC; "this month" is not an
+    # instant, it is a calendar question, and a monthly figure has to complete when the month
+    # ends where the person lives.
+    zone: ${LEDGER_ZONE:Asia/Kuala_Lumpur}
+    history-months: 12
   scheduling:
     enabled: ${SCHEDULING_ENABLED:true}

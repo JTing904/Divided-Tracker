@@ -13,6 +13,8 @@ import com.dividendstream.app.data.remote.GoogleDesktopSignInRequest
 import com.dividendstream.app.data.remote.GoogleSignInRequest
 import com.dividendstream.app.data.remote.LoginRequest
 import com.dividendstream.app.data.remote.RegisterRequest
+import com.dividendstream.app.data.remote.UpdateProfileRequest
+import com.dividendstream.app.data.remote.UserProfileDto
 import com.dividendstream.app.data.remote.apiCall
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
@@ -100,6 +102,34 @@ class AuthRepository(
         apiCall(json) { api.logout() }
         sessionStore.clear()
         snapshotCache.clear()
+    }
+
+    /** The account as the server has it, which is the copy that matters. */
+    suspend fun profile(): AppResult<UserProfileDto> = apiCall(json) { api.profile() }
+
+    /**
+     * Saves the account details and brings the stored session into line with them.
+     *
+     * The session carries the name the greeting is drawn from, so leaving it behind would show
+     * somebody their old name on the very screen they changed it from -- until the next sign-in,
+     * which could be weeks away. The tokens are untouched: this is not a re-authentication.
+     */
+    suspend fun updateProfile(name: String, baseCurrency: String): AppResult<UserProfileDto> {
+        val result = apiCall(json) {
+            api.updateProfile(UpdateProfileRequest(name = name.trim(), baseCurrency = baseCurrency))
+        }
+        if (result is AppResult.Success) {
+            sessionStore.load()?.let { session ->
+                sessionStore.save(
+                    session.copy(
+                        userName = result.data.name,
+                        userEmail = result.data.email,
+                        baseCurrency = result.data.baseCurrency,
+                    ),
+                )
+            }
+        }
+        return result
     }
 
     private suspend fun AppResult<AuthResponse>.persistOnSuccess() {

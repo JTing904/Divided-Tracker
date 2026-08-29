@@ -43,9 +43,9 @@ private val LightScheme = lightColorScheme(
  * Desktop theme. Identical palette to Android, minus the status-bar tinting, which has no
  * desktop equivalent.
  *
- * Dark by default rather than following the OS: the design is built around a near-black
- * canvas that makes the green figure the brightest thing on screen, and the light scheme
- * exists as a fallback rather than an equal partner.
+ * The caller decides which scheme, from the person's saved preference. The default here is
+ * dark only for a caller that expresses no opinion: the design is built around a near-black
+ * canvas that makes the green figure the brightest thing on screen.
  */
 @Composable
 fun DividendStreamTheme(

@@ -1,6 +1,7 @@
 package com.dividendstream.app.data.local
 
 import com.dividendstream.app.AppPaths
+import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.PortfolioDto
 import kotlinx.coroutines.Dispatchers
@@ -47,8 +48,16 @@ class SnapshotCache(
         read("portfolio.json") { json.decodeFromString(PortfolioDto.serializer(), it) }
     }
 
+    suspend fun saveLedger(ledger: LedgerDto) = withContext(Dispatchers.IO) {
+        write("ledger.json", json.encodeToString(LedgerDto.serializer(), ledger))
+    }
+
+    suspend fun readLedger(): CachedSnapshot<LedgerDto>? = withContext(Dispatchers.IO) {
+        read("ledger.json") { json.decodeFromString(LedgerDto.serializer(), it) }
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
-        listOf("live.json", "portfolio.json", "clock-offset").forEach {
+        listOf("live.json", "portfolio.json", "ledger.json", "clock-offset").forEach {
             Files.deleteIfExists(directory.resolve(it))
         }
         Unit

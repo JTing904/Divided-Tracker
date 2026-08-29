@@ -318,3 +318,158 @@ sealed interface GoogleAuthAttempt {
         val redirectUri: String,
     ) : GoogleAuthAttempt
 }
+
+// --- ledger ------------------------------------------------------------------
+
+@Serializable
+data class SaveCashFlowRequest(
+    /** Names this save, so sending it twice records one flow. */
+    val id: String? = null,
+    val name: String,
+    /** INCOME or EXPENSE. */
+    val direction: String,
+    val amount: BigDecimal,
+    /** DAILY, WEEKLY, MONTHLY or YEARLY. */
+    val period: String,
+    val category: String? = null,
+    val startsOn: LocalDate? = null,
+    val endsOn: LocalDate? = null,
+)
+
+@Serializable
+data class SaveLedgerEntryRequest(
+    val id: String? = null,
+    val direction: String,
+    val amount: BigDecimal,
+    val occurredOn: LocalDate? = null,
+    val category: String? = null,
+    val note: String? = null,
+)
+
+@Serializable
+data class SaveFundRequest(
+    val id: String? = null,
+    val name: String,
+    val percent: BigDecimal,
+    val icon: String? = null,
+    val position: Int? = null,
+)
+
+@Serializable
+data class CashFlowDto(
+    val id: String,
+    val name: String,
+    val direction: String,
+    val amount: BigDecimal,
+    val period: String,
+    val category: String? = null,
+    val currency: String,
+    val startsOn: LocalDate,
+    val endsOn: LocalDate? = null,
+    val ratePerSecond: BigDecimal,
+    /** Null when this flow is not live at any point in the current month. */
+    val windowStart: Instant? = null,
+    val windowEnd: Instant? = null,
+    val expectedThisMonth: BigDecimal,
+    val accruedThisMonth: BigDecimal,
+)
+
+@Serializable
+data class LedgerEntryDto(
+    val id: String,
+    val occurredOn: LocalDate,
+    val direction: String,
+    val amount: BigDecimal,
+    val category: String? = null,
+    val note: String? = null,
+)
+
+@Serializable
+data class FundDto(
+    val id: String,
+    val name: String,
+    val percent: BigDecimal,
+    val icon: String? = null,
+    val position: Int = 0,
+    val ratePerSecond: BigDecimal,
+    val plannedThisMonth: BigDecimal,
+    val accruedThisMonth: BigDecimal,
+)
+
+@Serializable
+data class LedgerRateDto(
+    val perSecond: BigDecimal,
+    val perMinute: BigDecimal,
+    val perHour: BigDecimal,
+    val perDay: BigDecimal,
+    val perWeek: BigDecimal,
+    val perMonth: BigDecimal,
+    val perYear: BigDecimal,
+)
+
+@Serializable
+data class MonthlyLedgerTotalDto(
+    val month: String,
+    val income: BigDecimal,
+    val expense: BigDecimal,
+    val net: BigDecimal,
+    val entryCount: Int = 0,
+)
+
+/**
+ * The whole ledger screen in one response.
+ *
+ * `planned` and `accrued` are projections from the recurring flows the person declared;
+ * `actual` is what they actually wrote down. The two are never added together, here or on the
+ * screen -- somebody reading a number has to know which of the two it is.
+ */
+@Serializable
+data class LedgerDto(
+    val serverTime: Instant,
+    val currency: String,
+    val month: String,
+    val monthStart: Instant,
+    val monthEnd: Instant,
+    val daysLeftInMonth: Long = 0,
+
+    val netRatePerSecond: BigDecimal,
+    val incomeRatePerSecond: BigDecimal,
+    val expenseRatePerSecond: BigDecimal,
+    val rate: LedgerRateDto,
+
+    val plannedIncome: BigDecimal,
+    val plannedExpense: BigDecimal,
+    val accruedIncome: BigDecimal,
+    val accruedExpense: BigDecimal,
+    val netAccrued: BigDecimal,
+
+    val actualIncome: BigDecimal,
+    val actualExpense: BigDecimal,
+    val actualNet: BigDecimal,
+
+    val funds: List<FundDto> = emptyList(),
+    val allocatedPercent: BigDecimal,
+    val unallocatedPercent: BigDecimal,
+
+    val flows: List<CashFlowDto> = emptyList(),
+    val entries: List<LedgerEntryDto> = emptyList(),
+    val months: List<MonthlyLedgerTotalDto> = emptyList(),
+)
+
+/**
+ * The parameters the shared accumulation calculator ticks from -- the same four the dividend
+ * counter uses, which is what keeps the client's figure and the server's in step.
+ *
+ * Null for a flow that is not live in the current month: it has nothing to contribute, and a
+ * stream with no window would count from the epoch.
+ */
+fun CashFlowDto.toAccumulationStream(): AccumulationStream? {
+    val start = windowStart ?: return null
+    val end = windowEnd ?: return null
+    return AccumulationStream(
+        expectedAmount = expectedThisMonth,
+        ratePerSecond = ratePerSecond,
+        start = start,
+        end = end,
+    )
+}

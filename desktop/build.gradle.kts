@@ -43,6 +43,7 @@ sourceSets {
             "com/dividendstream/app/data/local/SessionStore.kt",
             "com/dividendstream/app/data/local/SnapshotCache.kt",
             "com/dividendstream/app/data/local/PendingPurchaseStore.kt",
+            "com/dividendstream/app/data/local/SettingsStore.kt",
             // Reaches the container through LocalContext.
             "com/dividendstream/app/ui/AppViewModelProvider.kt",
             // Credential Manager is Android-only; the desktop opens a browser instead.

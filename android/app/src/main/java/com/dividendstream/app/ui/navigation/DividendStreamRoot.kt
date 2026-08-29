@@ -3,7 +3,7 @@ package com.dividendstream.app.ui.navigation
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,8 +48,12 @@ import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
 import com.dividendstream.app.ui.history.HistoryScreen
 import com.dividendstream.app.ui.history.HistoryViewModel
+import com.dividendstream.app.ui.ledger.LedgerScreen
+import com.dividendstream.app.ui.ledger.LedgerViewModel
 import com.dividendstream.app.ui.portfolio.PortfolioScreen
 import com.dividendstream.app.ui.portfolio.PortfolioViewModel
+import com.dividendstream.app.ui.profile.ProfileScreen
+import com.dividendstream.app.ui.profile.ProfileViewModel
 import com.dividendstream.app.ui.rememberAppContainer
 
 /**
@@ -128,10 +132,10 @@ private fun SignedInApp(
                         )
                     },
                     actions = {
-                        IconButton(onClick = onSignOut) {
+                        IconButton(onClick = { navController.navigate(Routes.PROFILE) }) {
                             Icon(
-                                Icons.AutoMirrored.Filled.Logout,
-                                contentDescription = "Sign out",
+                                Icons.Default.Person,
+                                contentDescription = "You",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -212,6 +216,23 @@ private fun SignedInApp(
                 PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
                     HistoryScreen(viewModel = viewModel)
                 }
+            }
+
+            composable(Routes.LEDGER) {
+                val viewModel: LedgerViewModel = viewModel(factory = factory)
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
+                    LedgerScreen(viewModel = viewModel)
+                }
+            }
+
+            composable(Routes.PROFILE) {
+                val viewModel: ProfileViewModel = viewModel(factory = factory)
+                ProfileScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onSignOut = onSignOut,
+                )
             }
 
             composable(Routes.ADD_STOCK) {

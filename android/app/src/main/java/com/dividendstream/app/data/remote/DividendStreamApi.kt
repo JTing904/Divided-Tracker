@@ -77,6 +77,31 @@ interface DividendStreamApi {
     suspend fun dividendDetail(@Path("id") id: String): DividendDto
 
     /**
+     * The whole ledger in one call. Poll-safe for the same reason the dividend counter is:
+     * the accruing figures are derived from stored parameters, so no write is performed.
+     */
+    @GET("api/ledger")
+    suspend fun ledger(): LedgerDto
+
+    @POST("api/ledger/flows")
+    suspend fun saveCashFlow(@Body request: SaveCashFlowRequest): CashFlowDto
+
+    @DELETE("api/ledger/flows/{id}")
+    suspend fun deleteCashFlow(@Path("id") id: String)
+
+    @POST("api/ledger/entries")
+    suspend fun saveLedgerEntry(@Body request: SaveLedgerEntryRequest): LedgerEntryDto
+
+    @DELETE("api/ledger/entries/{id}")
+    suspend fun deleteLedgerEntry(@Path("id") id: String)
+
+    @POST("api/ledger/funds")
+    suspend fun saveFund(@Body request: SaveFundRequest): FundDto
+
+    @DELETE("api/ledger/funds/{id}")
+    suspend fun deleteFund(@Path("id") id: String)
+
+    /**
      * Which build is serving, and which client release is current. Needs no session, and
      * touches no database -- so it answers even when the rest of the API cannot.
      */

@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRailItem
@@ -56,8 +56,12 @@ import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
 import com.dividendstream.app.ui.history.HistoryScreen
 import com.dividendstream.app.ui.history.HistoryViewModel
+import com.dividendstream.app.ui.ledger.LedgerScreen
+import com.dividendstream.app.ui.ledger.LedgerViewModel
 import com.dividendstream.app.ui.portfolio.PortfolioScreen
 import com.dividendstream.app.ui.portfolio.PortfolioViewModel
+import com.dividendstream.app.ui.profile.ProfileScreen
+import com.dividendstream.app.ui.profile.ProfileViewModel
 import com.dividendstream.app.ui.rememberAppContainer
 
 /**
@@ -70,7 +74,9 @@ private sealed interface Destination {
     data object Portfolio : Destination
     data object Calendar : Destination
     data object History : Destination
+    data object Ledger : Destination
     data object AddStock : Destination
+    data object Profile : Destination
     data class Detail(val symbol: String) : Destination
 }
 
@@ -79,6 +85,7 @@ private fun Destination.tab(): BottomTab? = when (this) {
     Destination.Portfolio -> BottomTab.Portfolio
     Destination.Calendar -> BottomTab.Calendar
     Destination.History -> BottomTab.History
+    Destination.Ledger -> BottomTab.Ledger
     else -> null
 }
 
@@ -87,6 +94,7 @@ private fun BottomTab.destination(): Destination = when (this) {
     BottomTab.Portfolio -> Destination.Portfolio
     BottomTab.Calendar -> Destination.Calendar
     BottomTab.History -> Destination.History
+    BottomTab.Ledger -> Destination.Ledger
 }
 
 /**
@@ -179,7 +187,7 @@ private fun SignedInApp(
         Sidebar(
             selected = current.tab(),
             onSelect = navigator::selectTab,
-            onSignOut = onSignOut,
+            onOpenProfile = { navigator.push(Destination.Profile) },
             userName = userName,
         )
 
@@ -232,6 +240,21 @@ private fun SignedInApp(
                         HistoryScreen(viewModel = viewModel)
                     }
 
+                    Destination.Ledger -> {
+                        val viewModel: LedgerViewModel = viewModel(factory = factory)
+                        RefreshOnEnter(viewModel::refresh)
+                        LedgerScreen(viewModel = viewModel)
+                    }
+
+                    Destination.Profile -> {
+                        val viewModel: ProfileViewModel = viewModel(factory = factory)
+                        ProfileScreen(
+                            viewModel = viewModel,
+                            onBack = navigator::pop,
+                            onSignOut = onSignOut,
+                        )
+                    }
+
                     Destination.AddStock -> {
                         val viewModel: AddStockViewModel = viewModel(factory = factory)
                         AddStockScreen(
@@ -265,7 +288,7 @@ private fun SignedInApp(
 private fun Sidebar(
     selected: BottomTab?,
     onSelect: (BottomTab) -> Unit,
-    onSignOut: () -> Unit,
+    onOpenProfile: () -> Unit,
     userName: String,
 ) {
     Column(
@@ -301,15 +324,18 @@ private fun Sidebar(
 
         Spacer(Modifier.weight(1f))
 
-        TextButton(onClick = onSignOut, modifier = Modifier.padding(horizontal = 12.dp)) {
+        // Sign out lives inside the profile screen now, alongside everything else about the
+        // person -- it was the only thing down here, which gave the one irreversible action in
+        // the app a permanent button of its own.
+        TextButton(onClick = onOpenProfile, modifier = Modifier.padding(horizontal = 12.dp)) {
             Icon(
-                Icons.AutoMirrored.Filled.Logout,
+                Icons.Default.Person,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(10.dp))
-            Text("Sign out", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("You", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

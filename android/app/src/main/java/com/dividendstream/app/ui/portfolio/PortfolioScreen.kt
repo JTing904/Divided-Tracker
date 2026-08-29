@@ -38,6 +38,7 @@ import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.data.remote.HoldingDto
 import com.dividendstream.app.data.remote.PortfolioDto
 import com.dividendstream.app.ui.components.DsCard
+import com.dividendstream.app.ui.components.describeAge
 import com.dividendstream.app.ui.components.EmptyState
 import com.dividendstream.app.ui.components.ErrorBanner
 import com.dividendstream.app.ui.components.LoadingBox
@@ -274,13 +275,3 @@ private fun LabelledFigure(label: String, value: String, modifier: Modifier = Mo
     }
 }
 
-private fun Instant?.describeAge(clock: ServerClock): String {
-    if (this == null) return "recently"
-    val minutes = Duration.between(this, clock.now()).toMinutes()
-    return when {
-        minutes < 1 -> "moments ago"
-        minutes < 60 -> "$minutes min ago"
-        minutes < 1_440 -> "${minutes / 60} h ago"
-        else -> "${minutes / 1_440} d ago"
-    }
-}

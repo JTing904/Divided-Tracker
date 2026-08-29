@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dividendstream.app.AppContainer
+import com.dividendstream.app.BuildConfig
 import com.dividendstream.app.DividendStreamApp
 import com.dividendstream.app.ui.addstock.AddStockViewModel
 import com.dividendstream.app.ui.auth.LoginViewModel
@@ -14,7 +15,9 @@ import com.dividendstream.app.ui.calendar.CalendarViewModel
 import com.dividendstream.app.ui.dashboard.DashboardViewModel
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
 import com.dividendstream.app.ui.history.HistoryViewModel
+import com.dividendstream.app.ui.ledger.LedgerViewModel
 import com.dividendstream.app.ui.portfolio.PortfolioViewModel
+import com.dividendstream.app.ui.profile.ProfileViewModel
 
 /** Reaches the application-scoped dependency container from a composable. */
 @Composable
@@ -36,6 +39,7 @@ object AppViewModelProvider {
         initializer {
             DashboardViewModel(
                 container.dividendRepository,
+                container.ledgerRepository,
                 container.appInfoRepository,
                 container.serverClock,
             )
@@ -50,6 +54,15 @@ object AppViewModelProvider {
         }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
+        initializer { LedgerViewModel(container.ledgerRepository, container.serverClock) }
+        initializer {
+            ProfileViewModel(
+                container.authRepository,
+                container.appInfoRepository,
+                container.settingsStore,
+                BuildConfig.VERSION_NAME,
+            )
+        }
     }
 
     /** Detail needs a symbol, so it gets its own factory per destination. */

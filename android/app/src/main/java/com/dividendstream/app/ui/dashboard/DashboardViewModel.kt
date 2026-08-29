@@ -5,10 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
+import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,12 +36,19 @@ data class DashboardUiState(
     val error: AppError? = null,
     /** A newer published release, or null when there is nothing to tell the user. */
     val newerRelease: String? = null,
+    /**
+     * The ledger, for the combined pace alone. Absent when it has not loaded or has nothing
+     * in it, and its absence is never an error here -- the dashboard is a dividend screen
+     * first, and the ledger has its own tab to report its own problems on.
+     */
+    val ledger: LedgerDto? = null,
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
 
 class DashboardViewModel(
     private val dividendRepository: DividendRepository,
+    private val ledgerRepository: LedgerRepository,
     private val appInfoRepository: AppInfoRepository,
     val serverClock: ServerClock,
 ) : ViewModel() {
@@ -50,6 +59,21 @@ class DashboardViewModel(
     init {
         refresh()
         checkForUpdate()
+    }
+
+    /**
+     * Loads the ledger for the combined figure only, and stays silent when it fails.
+     *
+     * A separate request rather than a field on the dividend response: the two are different
+     * parts of the backend with different shapes, and folding one into the other to save a
+     * round trip would tie them together for good. It runs alongside the dividend load, so it
+     * costs waiting time only if it is the slower of the two.
+     */
+    private fun loadLedger() {
+        viewModelScope.launch {
+            val result = ledgerRepository.ledger()
+            if (result is AppResult.Success) _state.update { it.copy(ledger = result.data.value) }
+        }
     }
 
     /**
@@ -81,6 +105,7 @@ class DashboardViewModel(
      * already on screen — the reason it cannot simply reuse [DashboardUiState.isLoading].
      */
     fun refresh(fromPull: Boolean = false) {
+        loadLedger()
         viewModelScope.launch {
             // Paint the saved copy before asking the server, not after giving up on it. The
             // backend sleeps between uses and can take two minutes to wake, and there is no

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.PortfolioDto
 import kotlinx.coroutines.flow.first
@@ -55,6 +56,17 @@ class SnapshotCache(
         json.decodeFromString(PortfolioDto.serializer(), it)
     }
 
+    suspend fun saveLedger(ledger: LedgerDto) {
+        context.cacheDataStore.edit { prefs ->
+            prefs[KEY_LEDGER] = json.encodeToString(LedgerDto.serializer(), ledger)
+            prefs[KEY_LEDGER_AT] = System.currentTimeMillis()
+        }
+    }
+
+    suspend fun readLedger(): CachedSnapshot<LedgerDto>? = read(KEY_LEDGER, KEY_LEDGER_AT) {
+        json.decodeFromString(LedgerDto.serializer(), it)
+    }
+
     suspend fun clear() {
         context.cacheDataStore.edit { it.clear() }
     }
@@ -80,6 +92,8 @@ class SnapshotCache(
         val KEY_LIVE_AT = longPreferencesKey("live_snapshot_at")
         val KEY_PORTFOLIO = stringPreferencesKey("portfolio_snapshot")
         val KEY_PORTFOLIO_AT = longPreferencesKey("portfolio_snapshot_at")
+        val KEY_LEDGER = stringPreferencesKey("ledger_snapshot")
+        val KEY_LEDGER_AT = longPreferencesKey("ledger_snapshot_at")
         val KEY_CLOCK_OFFSET = longPreferencesKey("server_clock_offset")
     }
 }

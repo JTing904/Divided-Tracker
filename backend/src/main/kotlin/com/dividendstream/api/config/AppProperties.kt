@@ -137,3 +137,29 @@ data class ReleaseProperties(
      */
     val commit: String = "",
 )
+
+@ConfigurationProperties(prefix = "dividend-stream.ledger")
+data class LedgerProperties(
+    /**
+     * The zone the ledger's month, week and day boundaries are drawn at.
+     *
+     * Everything else in this application is UTC, and stays UTC. But "this month" is a
+     * calendar question, not an instant one: a salary declared as RM3,000 a month has to land
+     * on exactly RM3,000 at the moment the month turns over *where the person lives*, and in
+     * Malaysia that is eight hours before it does in UTC.
+     *
+     * Configured rather than per-user because there is nowhere on an account to put a zone
+     * yet. That is the right refinement once this app has users in more than one of them;
+     * until then, an operator-set default is honest and a hidden hard-coded one would not be.
+     */
+    val zone: String = "Asia/Kuala_Lumpur",
+
+    /** How many past months of recorded entries the ledger screen lists totals for. */
+    val historyMonths: Int = 12,
+) {
+    val zoneId: java.time.ZoneId
+        // An unparseable zone would otherwise fail at the first request rather than at boot,
+        // and silently falling back to UTC would move everyone's month boundary by 8 hours
+        // without saying so.
+        get() = java.time.ZoneId.of(zone)
+}

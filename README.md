@@ -241,6 +241,8 @@ provider by implementing the interface and setting `MARKET_DATA_PROVIDER`.
 | `GET`/`POST /api/portfolio`, `PUT`/`DELETE /api/portfolio/{id}` | |
 | `GET /api/dividends/live` | live snapshot + accumulation parameters |
 | `GET /api/dividends/upcoming` · `history` · `{id}` | |
+| `GET /api/ledger` | the whole ledger screen: live rate, funds, this month's records |
+| `POST`/`DELETE /api/ledger/flows` · `entries` · `funds` | saves carry a client id, so a resend records once |
 | `GET /api/app/version` | running build, current client release; unauthenticated, no database |
 
 Every user-scoped query is filtered by the user id in the JWT, never by a path parameter, so
@@ -248,10 +250,36 @@ a guessed id resolves to nothing.
 
 ---
 
+## The ledger
+
+The same engine, pointed at money that has nothing to do with the market.
+
+A person declares what repeats — a salary, an allowance, rent, a subscription — **by the day,
+the week, the month or the year**, all four equal. Each one is stored as an amount and a period;
+the per-second rate is derived, and nothing is ever written per second. Income minus outgoings
+is the figure on screen, and it counts *downwards* in a month where the outgoings win.
+
+What is left over can be split into **funds** by percentage — an emergency pot, a trip, an
+investment — each filling in real time. A share rather than a fixed figure, so a fund keeps up
+when a salary changes. Nothing is allocated out of a deficit.
+
+Two kinds of number live on that screen and are never added together:
+
+| | |
+|---|---|
+| `planned` / `accrued` | projections, from the flows the person declared |
+| `actual` | records, from the entries they wrote down |
+
+The month is a *calendar* month drawn at `LEDGER_ZONE` (default `Asia/Kuala_Lumpur`), so a
+salary declared as RM3,000 a month lands on exactly RM3,000 — in February as well as in July.
+Everything else in the backend remains UTC.
+
+---
+
 ## Status
 
-Delivered: authentication, portfolio, the dividend engine, the live dashboard, calendar and
-history — end to end and tested.
+Delivered: authentication, portfolio, the dividend engine, the live dashboard, calendar,
+history, the ledger and the profile screen — end to end and tested.
 
 Not yet built: push notifications, charts, a real market-data provider, and multi-currency.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for where each of those plugs in.

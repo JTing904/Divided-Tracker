@@ -3,11 +3,13 @@ package com.dividendstream.app
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
+import com.dividendstream.app.data.local.SettingsStore
 import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.NetworkModule
 import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
+import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
 import com.dividendstream.app.data.repository.PurchaseQueue
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +28,9 @@ class AppContainer {
     val serverClock = ServerClock()
     val sessionStore = SessionStore()
 
+    /** Device preferences. Deliberately survives signing out; a theme is not account data. */
+    val settingsStore = SettingsStore()
+
     private val network = NetworkModule(
         baseUrl = BuildConfig.API_BASE_URL,
         sessionStore = sessionStore,
@@ -37,6 +42,7 @@ class AppContainer {
     val authRepository = AuthRepository(network.api, sessionStore, snapshotCache, network.json)
     val portfolioRepository = PortfolioRepository(network.api, snapshotCache, network.json)
     val dividendRepository = DividendRepository(network.api, snapshotCache, serverClock, network.json)
+    val ledgerRepository = LedgerRepository(network.api, snapshotCache, network.json)
     val appInfoRepository = AppInfoRepository(network.api, network.json, BuildConfig.VERSION_NAME)
 
     /** Whether the server is answering. Fed by real traffic; read by screens that need it up. */

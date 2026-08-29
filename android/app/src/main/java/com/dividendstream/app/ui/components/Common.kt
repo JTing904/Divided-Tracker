@@ -518,3 +518,20 @@ fun AccrualProgressBar(progress: Float, modifier: Modifier = Modifier) {
         trackColor = MaterialTheme.colorScheme.surfaceVariant,
     )
 }
+
+/**
+ * How long ago a saved copy was written, in the words a person would use.
+ *
+ * Lives here because three screens paint a stale banner and all three need the same phrasing:
+ * "5 min ago" on one and "5 minutes ago" on another would read as two different facts.
+ */
+fun java.time.Instant?.describeAge(clock: com.dividendstream.app.core.ServerClock): String {
+    if (this == null) return "recently"
+    val minutes = java.time.Duration.between(this, clock.now()).toMinutes()
+    return when {
+        minutes < 1 -> "moments ago"
+        minutes < 60 -> "$minutes min ago"
+        minutes < 1_440 -> "${minutes / 60} h ago"
+        else -> "${minutes / 1_440} d ago"
+    }
+}

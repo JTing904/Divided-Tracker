@@ -1,5 +1,6 @@
 package com.dividendstream.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,10 +28,12 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.dividendstream.app.AppContainer
 import com.dividendstream.app.DesktopSettings
+import com.dividendstream.app.core.ThemePreference
 import com.dividendstream.app.ui.LocalAppContainer
 import com.dividendstream.app.ui.navigation.DesktopRoot
 import com.dividendstream.app.ui.theme.DividendStreamTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -71,6 +74,10 @@ fun main() = application {
         }
     }
 
+    // Built before the backend is up: it constructs HTTP clients and file-backed stores and
+    // touches nothing over the network, and the theme the window opens in is read from it.
+    val container = remember { AppContainer() }
+
     val windowState = rememberWindowState(
         size = DpSize(1180.dp, 820.dp),
         position = WindowPosition(Alignment.Center),
@@ -88,10 +95,14 @@ fun main() = application {
         state = windowState,
         title = "Dividend Stream",
     ) {
-        DividendStreamTheme {
+        // Read outside the Ready branch so the starting screen is already in the chosen
+        // scheme: a window that opens dark and turns light once the database is up looks
+        // like a fault.
+        val preference by container.settingsStore.theme.collectAsState(initial = ThemePreference.System)
+
+        DividendStreamTheme(darkTheme = preference.isDark(isSystemInDarkTheme())) {
             when (val state = backend) {
                 BackendState.Ready -> {
-                    val container = remember { AppContainer() }
                     CompositionLocalProvider(LocalAppContainer provides container) {
                         DesktopRoot()
                     }
