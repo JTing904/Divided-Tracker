@@ -491,6 +491,48 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    @DisplayName("a mistyped movement is corrected in place, not doubled")
+    fun `resending a movement with its id corrects it`() {
+        val token = register("typo@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+
+        val movementId = objectMapper.readTree(
+            move(token, fundId, """{"direction":"DEPOSIT","amount":"5000.00"}"""),
+        )["id"].asText()
+        // Meant RM500, typed RM5000.
+        move(token, fundId, """{"id":"$movementId","direction":"DEPOSIT","amount":"500.00"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        assertThat(fund["movements"]).hasSize(1)
+        assertThat(fund["paidIn"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+    }
+
+    @Test
+    @DisplayName("a movement that never happened can be removed")
+    fun `a movement can be deleted`() {
+        val token = register("undo@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+        val movementId = objectMapper.readTree(
+            move(token, fundId, """{"direction":"DEPOSIT","amount":"250.00"}"""),
+        )["id"].asText()
+
+        mockMvc.perform(
+            delete("/api/ledger/movements/$movementId")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
+        ).andExpect(status().isNoContent)
+
+        val fund = ledger(token)["funds"][0]
+        assertThat(fund["movements"]).isEmpty()
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
     @DisplayName("deleting a fund takes its movements with it")
     fun `movements do not outlive their fund`() {
         val token = register("tidy@example.com")

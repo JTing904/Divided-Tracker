@@ -51,13 +51,25 @@ sealed interface LedgerEditor {
     /** A recurring flow. [existing] is null when adding. */
     data class Flow(val direction: String, val existing: CashFlowDto? = null) : LedgerEditor
 
-    /** One thing that happened. */
-    data class Entry(val direction: String) : LedgerEditor
+    /** One thing that happened. [existing] is null when adding. */
+    data class Entry(
+        val direction: String,
+        val existing: com.dividendstream.app.data.remote.LedgerEntryDto? = null,
+    ) : LedgerEditor
 
     data class Fund(val existing: FundDto? = null) : LedgerEditor
 
-    /** Money into or out of one fund. [direction] is DEPOSIT or WITHDRAWAL. */
-    data class Movement(val fund: FundDto, val direction: String) : LedgerEditor
+    /**
+     * Money into or out of one fund. [direction] is DEPOSIT or WITHDRAWAL.
+     *
+     * [existing] is null when adding. Editing rather than deleting and re-entering matters
+     * here: a mistyped amount is a correction to one event, not two events that cancel.
+     */
+    data class Movement(
+        val fund: FundDto,
+        val direction: String,
+        val existing: com.dividendstream.app.data.remote.FundMovementDto? = null,
+    ) : LedgerEditor
 }
 
 @Composable
@@ -176,22 +188,31 @@ private fun EntryDialog(
     isSaving: Boolean,
     onDismiss: () -> Unit,
 ) {
-    var direction by remember { mutableStateOf(editor.direction) }
-    var amount by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(defaultIcon(income = false)) }
-    var occurredOn by remember { mutableStateOf(LocalDate.now().toString()) }
+    val existing = editor.existing
+    var direction by remember { mutableStateOf(existing?.direction ?: editor.direction) }
+    var amount by remember { mutableStateOf(existing?.amount?.toPriceInput().orEmpty()) }
+    var note by remember { mutableStateOf(existing?.note.orEmpty()) }
+    var category by remember {
+        mutableStateOf(
+            if (existing != null) LedgerIcon.of(existing.category)
+            else defaultIcon(income = false),
+        )
+    }
+    var occurredOn by remember {
+        mutableStateOf((existing?.occurredOn ?: LocalDate.now()).toString())
+    }
 
     val income = direction == "INCOME"
     val parsedAmount = amount.toAmountOrNull()
     val parsedDate = occurredOn.toDateOrNull()
 
     EditorScaffold(
-        title = "Write it down",
-        confirmLabel = if (isSaving) "Saving…" else "Record",
+        title = if (existing != null) "Fix this record" else "Write it down",
+        confirmLabel = if (isSaving) "Saving…" else if (existing != null) "Save" else "Record",
         canConfirm = parsedAmount != null && parsedDate != null && !isSaving,
         onConfirm = {
             viewModel.saveEntry(
+                id = existing?.id,
                 direction = direction,
                 amount = parsedAmount!!,
                 occurredOn = parsedDate,
@@ -338,11 +359,14 @@ private fun MovementDialog(
     onDismiss: () -> Unit,
 ) {
     val fund = editor.fund
-    val depositing = editor.direction == "DEPOSIT"
+    val existing = editor.existing
+    val depositing = (existing?.direction ?: editor.direction) == "DEPOSIT"
 
-    var amount by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var occurredOn by remember { mutableStateOf(LocalDate.now().toString()) }
+    var amount by remember { mutableStateOf(existing?.amount?.toPriceInput().orEmpty()) }
+    var note by remember { mutableStateOf(existing?.note.orEmpty()) }
+    var occurredOn by remember {
+        mutableStateOf((existing?.occurredOn ?: LocalDate.now()).toString())
+    }
 
     val parsedAmount = amount.toAmountOrNull()
     val parsedDate = occurredOn.toDateOrNull()
@@ -352,13 +376,23 @@ private fun MovementDialog(
         parsedAmount.subtract(fund.balance).signum() > 0
 
     EditorScaffold(
-        title = if (depositing) "Add to ${fund.name}" else "Spend from ${fund.name}",
-        confirmLabel = if (isSaving) "Saving…" else if (depositing) "Add" else "Spend",
+        title = when {
+            existing != null -> "Fix this entry"
+            depositing -> "Add to ${fund.name}"
+            else -> "Spend from ${fund.name}"
+        },
+        confirmLabel = when {
+            isSaving -> "Saving…"
+            existing != null -> "Save"
+            depositing -> "Add"
+            else -> "Spend"
+        },
         canConfirm = parsedAmount != null && parsedDate != null && !isSaving,
         onConfirm = {
             viewModel.moveFundMoney(
                 fundId = fund.id,
-                direction = editor.direction,
+                id = existing?.id,
+                direction = existing?.direction ?: editor.direction,
                 amount = parsedAmount!!,
                 occurredOn = parsedDate,
                 note = note.trim().takeIf { it.isNotEmpty() },
@@ -368,7 +402,9 @@ private fun MovementDialog(
         onDismiss = onDismiss,
     ) {
         Text(
-            if (depositing) {
+            if (existing != null) {
+                "Change the amount or the date, or delete it from the list if it never happened."
+            } else if (depositing) {
                 "This fund already fills itself with ${fund.percent.toPlainString()}% of what " +
                     "is left over. Add money here only when you put in something extra."
             } else {

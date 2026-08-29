@@ -186,6 +186,10 @@ fun LedgerScreen(
                         onMove = { direction ->
                             editor = LedgerEditor.Movement(fund, direction)
                         },
+                        onEditMovement = { movement ->
+                            editor = LedgerEditor.Movement(fund, movement.direction, movement)
+                        },
+                        onDeleteMovement = { viewModel.deleteFundMovement(it) },
                         onDelete = { viewModel.deleteFund(fund.id) },
                     )
                 }
@@ -236,6 +240,7 @@ fun LedgerScreen(
                         EntryRow(
                             entry = entry,
                             currency = ledger.currency,
+                            onEdit = { editor = LedgerEditor.Entry(entry.direction, entry) },
                             onDelete = { viewModel.deleteEntry(entry.id) },
                         )
                     }
@@ -593,6 +598,8 @@ private fun FundRow(
     clock: ServerClock,
     onEdit: () -> Unit,
     onMove: (String) -> Unit,
+    onEditMovement: (FundMovementDto) -> Unit,
+    onDeleteMovement: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
@@ -687,18 +694,51 @@ private fun FundRow(
 
         if (fund.movements.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            fund.movements.take(3).forEach { movement ->
-                MovementRow(movement, ledger.currency)
+            fund.movements.take(MOVEMENTS_SHOWN).forEach { movement ->
+                MovementRow(
+                    movement = movement,
+                    currency = ledger.currency,
+                    onEdit = { onEditMovement(movement) },
+                    onDelete = { onDeleteMovement(movement.id) },
+                )
+            }
+            val hidden = fund.movements.size - MOVEMENTS_SHOWN
+            if (hidden > 0) {
+                Text(
+                    "and $hidden more",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
     }
 }
 
+/** How many of a fund's movements are listed on its row before the rest are summarised. */
+private const val MOVEMENTS_SHOWN = 3
+
+/**
+ * One movement, correctable.
+ *
+ * Tapping edits rather than only offering a delete, because a mistyped amount is a correction
+ * to one thing that happened, not two things that cancel out. Deleting and re-entering would
+ * leave the same balance and a history that says the money went in twice and came out once.
+ */
 @Composable
-private fun MovementRow(movement: FundMovementDto, currency: String) {
+private fun MovementRow(
+    movement: FundMovementDto,
+    currency: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val deposit = movement.direction == "DEPOSIT"
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onEdit)
+            .padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -719,6 +759,14 @@ private fun MovementRow(movement: FundMovementDto, currency: String) {
             style = MaterialTheme.typography.bodySmall,
             color = if (deposit) DividendColors.Growth else DividendColors.Danger,
         )
+        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "Remove this entry",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+        }
     }
 }
 
@@ -1109,12 +1157,17 @@ private fun ActualTotals(ledger: LedgerDto) {
 }
 
 @Composable
-private fun EntryRow(entry: LedgerEntryDto, currency: String, onDelete: () -> Unit) {
+private fun EntryRow(
+    entry: LedgerEntryDto,
+    currency: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val income = entry.direction == "INCOME"
     val badge = LedgerIcon.of(entry.category)
 
     DsCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

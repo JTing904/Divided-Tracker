@@ -283,6 +283,7 @@ class LedgerViewModel(
      */
     fun moveFundMoney(
         fundId: String,
+        id: String? = null,
         direction: String,
         amount: BigDecimal,
         occurredOn: LocalDate? = null,
@@ -291,7 +292,8 @@ class LedgerViewModel(
     ) = perform(onSaved) {
         ledgerRepository.saveFundMovement(
             fundId = fundId,
-            id = UUID.randomUUID().toString(),
+            // Reusing the id turns the save into a correction rather than a second movement.
+            id = id ?: UUID.randomUUID().toString(),
             direction = direction,
             amount = amount,
             occurredOn = occurredOn,
