@@ -211,6 +211,12 @@ object CashFlowEngine {
             .divide(BigDecimal.valueOf(window.seconds), 6, RoundingMode.DOWN)
     }
 
+    /** The calendar month containing [first], in [zone]. */
+    fun monthOf(first: LocalDate, zone: ZoneId): Window = Window(
+        start = first.withDayOfMonth(1).atStartOfDay(zone).toInstant(),
+        end = first.withDayOfMonth(1).plusMonths(1).atStartOfDay(zone).toInstant(),
+    )
+
     /** Whole months back from the month containing [at], newest first. Used for the history list. */
     fun recentMonths(at: Instant, zone: ZoneId, count: Int): List<LocalDate> {
         val first = LocalDate.ofInstant(at, zone).withDayOfMonth(1)

@@ -127,3 +127,43 @@ class FundEntity(
     @Column(name = "position", nullable = false)
     var position: Int = 0,
 ) : AuditableEntity()
+
+/** Which way money moved between a person and one of their funds. */
+enum class FundMovementDirection { DEPOSIT, WITHDRAWAL }
+
+/**
+ * Money actually put into, or taken out of, a fund.
+ *
+ * A fact, like [LedgerEntryEntity] and unlike [FundEntity]'s share of the surplus. Nothing
+ * here is ever created by the app on the person's behalf: a deposit means they moved the
+ * money, and the difference between "the plan says RM412 should go to the emergency fund" and
+ * "RM412 is in the emergency fund" is the whole point of keeping this table separate.
+ */
+@Entity
+@Table(name = "fund_movements")
+class FundMovementEntity(
+
+    @Id
+    @Column(name = "id", nullable = false, updatable = false)
+    var id: UUID = UUID.randomUUID(),
+
+    @Column(name = "user_id", nullable = false, updatable = false)
+    var userId: UUID = UUID.randomUUID(),
+
+    @Column(name = "fund_id", nullable = false, updatable = false)
+    var fundId: UUID = UUID.randomUUID(),
+
+    @Column(name = "occurred_on", nullable = false)
+    var occurredOn: LocalDate = LocalDate.EPOCH,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "direction", nullable = false, length = 16)
+    var direction: FundMovementDirection = FundMovementDirection.DEPOSIT,
+
+    /** Always positive. [direction] carries the sign. */
+    @Column(name = "amount", nullable = false, precision = 19, scale = 2)
+    var amount: BigDecimal = BigDecimal.ZERO,
+
+    @Column(name = "note", length = 200)
+    var note: String? = null,
+) : AuditableEntity()

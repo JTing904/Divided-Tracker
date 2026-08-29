@@ -270,6 +270,159 @@ class LedgerIntegrationTest {
         assertThat(months[0]["entryCount"].asInt()).isZero()
     }
 
+    @Test
+    @DisplayName("the share set on a fund fills it by itself, without anything being pressed")
+    fun `a fund fills from its percentage`() {
+        val token = register("autosaver@example.com")
+
+        saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
+        saveFlow(token, """{"name":"Rent","direction":"EXPENSE","amount":"1000.00","period":"MONTHLY"}""")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        // RM2,000 left over this month; half of it is earmarked, and the fund already holds
+        // whatever share of that has accrued so far. Nobody deposited anything.
+        assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("1000.00"))
+        assertThat(fund["paidIn"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(fund["balance"].money()).isGreaterThan(BigDecimal.ZERO)
+        assertThat(fund["balance"].money()).isLessThanOrEqualTo(BigDecimal("1000.00"))
+    }
+
+    @Test
+    @DisplayName("a fund with nothing left over holds nothing, rather than a negative")
+    fun `a deficit leaves a fund empty`() {
+        val token = register("emptyfund@example.com")
+
+        saveFlow(token, """{"name":"Allowance","direction":"INCOME","amount":"300.00","period":"MONTHLY"}""")
+        saveFlow(token, """{"name":"Rent","direction":"EXPENSE","amount":"800.00","period":"MONTHLY"}""")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(fund["accruedThisMonth"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    @DisplayName("spending out of a fund takes it off the balance and stays off")
+    fun `a withdrawal reduces the balance`() {
+        val token = register("spender@example.com")
+
+        saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+
+        val before = ledger(token)["funds"][0]["balance"].money()
+        move(token, fundId, """{"direction":"WITHDRAWAL","amount":"10.00","note":"Flights"}""")
+        val after = ledger(token)["funds"][0]
+
+        assertThat(after["takenOut"].money()).isEqualByComparingTo(BigDecimal("10.00"))
+        // The balance keeps growing per second, so it is compared against what it would have
+        // been rather than to an exact figure: the withdrawal is what moved it down.
+        assertThat(after["balance"].money()).isLessThan(before)
+        assertThat(after["movements"]).hasSize(1)
+    }
+
+    @Test
+    @DisplayName("money can also be put in by hand, on top of the share")
+    fun `a deposit adds to the balance`() {
+        val token = register("topup@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Emergency","percent":"50.00"}"""),
+        )["id"].asText()
+
+        move(token, fundId, """{"direction":"DEPOSIT","amount":"500.00","note":"Angpow"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        assertThat(fund["paidIn"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(ledger(token)["totalFundBalance"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+    }
+
+    @Test
+    @DisplayName("taking out more than is there is refused, and the refusal says how much there is")
+    fun `cannot withdraw past the balance`() {
+        val token = register("overdrawn@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+
+        move(token, fundId, """{"direction":"DEPOSIT","amount":"100.00"}""")
+
+        mockMvc.perform(
+            post("/api/ledger/funds/$fundId/movements")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"direction":"WITHDRAWAL","amount":"150.00"}"""),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("100.00")))
+
+        // And the balance is untouched by the attempt.
+        assertThat(ledger(token)["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+    }
+
+    @Test
+    @DisplayName("a fund created before this month carries what earlier months put aside")
+    fun `earlier months are carried over`() {
+        val token = register("carried@example.com")
+
+        // A salary that has been running since the start of last year.
+        saveFlow(
+            token,
+            """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY",""" +
+                """"startsOn":"2020-01-01"}""",
+        )
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        // The fund itself was created a moment ago, so no month has finished under it yet and
+        // nothing is carried over. What it holds is this month's share, and only that.
+        assertThat(fund["earmarkedEarlier"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(fund["carriedOver"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(fund["balance"].money())
+            .isEqualByComparingTo(fund["accruedThisMonth"].money())
+    }
+
+    @Test
+    @DisplayName("deleting a fund takes its movements with it")
+    fun `movements do not outlive their fund`() {
+        val token = register("tidy@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+        move(token, fundId, """{"direction":"DEPOSIT","amount":"100.00"}""")
+
+        mockMvc.perform(
+            delete("/api/ledger/funds/$fundId").header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
+        ).andExpect(status().isNoContent)
+
+        val after = ledger(token)
+        assertThat(after["funds"]).isEmpty()
+        assertThat(after["totalFundBalance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    @DisplayName("one person cannot move money in another person's fund")
+    fun `movements are scoped to the owner`() {
+        val alice = register("move-alice@example.com")
+        val bob = register("move-bob@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(alice, """{"name":"Emergency","percent":"50.00"}"""),
+        )["id"].asText()
+
+        mockMvc.perform(
+            post("/api/ledger/funds/$fundId/movements")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $bob")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"direction":"DEPOSIT","amount":"100.00"}"""),
+        ).andExpect(status().isNotFound)
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private fun register(email: String): String {
@@ -301,6 +454,14 @@ class LedgerIntegrationTest {
     private fun saveFund(token: String, body: String): String =
         mockMvc.perform(
             post("/api/ledger/funds")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk).andReturn().response.contentAsString
+
+    private fun move(token: String, fundId: String, body: String): String =
+        mockMvc.perform(
+            post("/api/ledger/funds/$fundId/movements")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body),

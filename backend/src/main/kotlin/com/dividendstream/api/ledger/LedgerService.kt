@@ -32,6 +32,7 @@ class LedgerService(
     private val cashFlowRepository: CashFlowRepository,
     private val entryRepository: LedgerEntryRepository,
     private val fundRepository: FundRepository,
+    private val movementRepository: FundMovementRepository,
     private val userRepository: UserRepository,
     private val properties: LedgerProperties,
     private val clock: Clock,
@@ -69,6 +70,13 @@ class LedgerService(
         val funds = fundRepository.findAllByUserIdOrderByPositionAscCreatedAtAsc(userId)
         val allocated = funds.fold(BigDecimal.ZERO) { sum, it -> sum + it.percent }
             .setScale(PERCENT_SCALE, RoundingMode.HALF_UP)
+        // One query for every fund's movements rather than one per fund.
+        val movements = movementRepository
+            .findAllByUserIdOrderByOccurredOnDescCreatedAtDesc(userId)
+            .groupBy { it.fundId }
+        val describedFunds = funds.map {
+            it.describe(netRate, plannedSurplus, netAccrued, movements[it.id].orEmpty(), flows, now, zone)
+        }
 
         return LedgerResponse(
             serverTime = now,
@@ -93,9 +101,12 @@ class LedgerService(
             actualExpense = Money.amount(actualExpense),
             actualNet = Money.amount(actualIncome.subtract(actualExpense)),
 
-            funds = funds.map { it.describe(netRate, plannedSurplus, netAccrued) },
+            funds = describedFunds,
             allocatedPercent = allocated,
             unallocatedPercent = HUNDRED.subtract(allocated),
+            totalFundBalance = Money.amount(
+                describedFunds.fold(BigDecimal.ZERO) { sum, it -> sum + it.balance },
+            ),
 
             flows = described,
             entries = entries.map { it.describe() },
@@ -228,9 +239,81 @@ class LedgerService(
         request.position?.let { entity.position = it }
 
         val saved = fundRepository.save(entity)
-        // Described against zero: the caller is about to reload the ledger anyway, and
-        // computing a surplus here would mean loading every flow to answer a save.
-        return saved.describe(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO)
+        // Described against a zero surplus: the caller is about to reload the ledger anyway,
+        // and computing one here would mean loading every flow to answer a save.
+        return saved.describe(
+            BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+            movementRepository.findAllByFundIdOrderByOccurredOnDescCreatedAtDesc(saved.id),
+            emptyList(), Instant.now(clock), properties.zoneId,
+        )
+    }
+
+    /**
+     * Records money going into or out of a fund.
+     *
+     * A withdrawal larger than the balance is refused, and the refusal says what is actually
+     * there. Allowing it would leave a fund holding a negative amount, which is not a thing
+     * that can happen to a pot of money -- it means either a typo or that some deposits were
+     * never recorded, and both are better fixed than stored.
+     */
+    @Transactional
+    fun saveFundMovement(
+        userId: UUID,
+        fundId: UUID,
+        request: SaveFundMovementRequest,
+    ): FundMovementResponse {
+        val fund = fundRepository.findByIdAndUserId(fundId, userId)
+            .orElseThrow { NotFoundException("That fund was not found.") }
+
+        val existing = request.id?.let { id ->
+            movementRepository.findById(id).orElse(null)?.also {
+                if (it.userId != userId) throw NotFoundException("That movement was not found.")
+            }
+        }
+
+        val amount = Money.amount(request.amount)
+        if (request.direction == FundMovementDirection.WITHDRAWAL) {
+            val others = movementRepository
+                .findAllByFundIdOrderByOccurredOnDescCreatedAtDesc(fund.id)
+                .filter { it.id != existing?.id }
+            // What is actually available is the plan's accumulated share as well as anything
+            // paid in by hand -- otherwise somebody could not spend the money the fund had
+            // been filling with all year without first depositing it to themselves.
+            val now = Instant.now(clock)
+            val zone = properties.zoneId
+            val flows = cashFlowRepository.findAllByUserIdOrderByCreatedAtAsc(userId)
+            val share = fund.percent.divide(HUNDRED, SHARE_SCALE, RoundingMode.HALF_UP)
+            val month = CashFlowEngine.monthWindow(now, zone)
+            val available = fund.earmarkedBeforeThisMonth(share, flows, now, zone)
+                .add(fund.accruedShareThisMonth(share, flows, month, now, zone))
+                .add(others.total(FundMovementDirection.DEPOSIT))
+                .subtract(others.total(FundMovementDirection.WITHDRAWAL))
+            if (amount > available) {
+                throw InvalidRequestException(
+                    "There is only ${Money.amount(available).toPlainString()} in ${fund.name}.",
+                )
+            }
+        }
+
+        val entity = existing ?: FundMovementEntity(
+            id = request.id ?: UUID.randomUUID(),
+            userId = userId,
+            fundId = fund.id,
+        )
+
+        entity.direction = request.direction
+        entity.amount = amount
+        entity.occurredOn = request.occurredOn ?: LocalDate.now(clock.withZone(properties.zoneId))
+        entity.note = request.note?.trim()?.takeIf { it.isNotEmpty() }
+
+        return movementRepository.save(entity).describe()
+    }
+
+    @Transactional
+    fun deleteFundMovement(userId: UUID, id: UUID) {
+        val movement = movementRepository.findByIdAndUserId(id, userId)
+            .orElseThrow { NotFoundException("That movement was not found.") }
+        movementRepository.delete(movement)
     }
 
     @Transactional
@@ -309,10 +392,20 @@ class LedgerService(
         netRate: BigDecimal,
         plannedSurplus: BigDecimal,
         netAccrued: BigDecimal,
+        movements: List<FundMovementEntity>,
+        flows: List<CashFlowEntity>,
+        now: Instant,
+        zone: java.time.ZoneId,
     ): FundResponse {
         val share = percent.divide(HUNDRED, SHARE_SCALE, RoundingMode.HALF_UP)
+        val paidIn = movements.total(FundMovementDirection.DEPOSIT)
+        val takenOut = movements.total(FundMovementDirection.WITHDRAWAL)
         fun of(total: BigDecimal, round: (BigDecimal) -> BigDecimal) =
             if (total.signum() <= 0) round(BigDecimal.ZERO) else round(total.multiply(share))
+
+        val fromEarlierMonths = earmarkedBeforeThisMonth(share, flows, now, zone)
+        val carriedOver = fromEarlierMonths.add(paidIn).subtract(takenOut)
+        val thisMonth = of(netAccrued, Money::accrual)
 
         return FundResponse(
             id = id,
@@ -322,9 +415,96 @@ class LedgerService(
             position = position,
             ratePerSecond = of(netRate, Money::rate),
             plannedThisMonth = of(plannedSurplus, Money::amount),
-            accruedThisMonth = of(netAccrued, Money::accrual),
+            accruedThisMonth = thisMonth,
+            carriedOver = Money.amount(carriedOver),
+            earmarkedEarlier = Money.amount(fromEarlierMonths),
+            balance = Money.accrual(carriedOver.add(thisMonth)),
+            paidIn = Money.amount(paidIn),
+            takenOut = Money.amount(takenOut),
+            movements = movements.map { it.describe() },
         )
     }
+
+    /**
+     * This fund's share of every month that has already finished, since it was created.
+     *
+     * The plan fills the fund by itself. Making somebody press a button each month to bank
+     * their own allocation would leave a fund reading zero for anyone who forgot -- not a
+     * truer number, just a less useful one, and not what setting a percentage means.
+     *
+     * Each past month is recomputed from the flows as they stand, with their start and end
+     * dates respected: a month before a salary began contributes nothing, because the flow was
+     * not live in it. What this cannot know is that the salary was a different figure back
+     * then -- a raise entered today is applied backwards. That is the price of deriving the
+     * history rather than storing a total per month, and it is why this is labelled a
+     * projection everywhere it appears, beside the withdrawals, which are facts.
+     */
+    private fun FundEntity.earmarkedBeforeThisMonth(
+        share: BigDecimal,
+        flows: List<CashFlowEntity>,
+        now: Instant,
+        zone: java.time.ZoneId,
+    ): BigDecimal {
+        val thisMonth = LocalDate.ofInstant(now, zone).withDayOfMonth(1)
+        var month = LocalDate.ofInstant(createdAt, zone).withDayOfMonth(1)
+        var total = BigDecimal.ZERO
+        var guard = 0
+
+        while (month.isBefore(thisMonth) && guard++ < MAX_HISTORY_MONTHS) {
+            val surplus = surplusOver(CashFlowEngine.monthOf(month, zone), flows, zone)
+            // A month that ran a deficit puts nothing aside, and takes nothing back out
+            // either: the fund did not pay the rent.
+            if (surplus.signum() > 0) total = total.add(surplus.multiply(share))
+            month = month.plusMonths(1)
+        }
+        return total
+    }
+
+    /** Income minus outgoings across a whole month, from the flows that were live during it. */
+    private fun surplusOver(
+        month: Window,
+        flows: List<CashFlowEntity>,
+        zone: java.time.ZoneId,
+    ): BigDecimal {
+        // An instant inside the month, so each rate is divided by that month's own length.
+        val inside = month.start.plusSeconds(1)
+        return flows.fold(BigDecimal.ZERO) { sum, flow ->
+            val expected = CashFlowEngine
+                .project(flow.amount, flow.period, flow.startsOn, flow.endsOn, month, inside, zone)
+                .expected
+            if (flow.direction == FlowDirection.INCOME) sum.add(expected) else sum.subtract(expected)
+        }
+    }
+
+    /** This fund's share of what the plan has put aside so far this month. */
+    private fun FundEntity.accruedShareThisMonth(
+        share: BigDecimal,
+        flows: List<CashFlowEntity>,
+        month: Window,
+        now: Instant,
+        zone: java.time.ZoneId,
+    ): BigDecimal {
+        val accrued = flows.fold(BigDecimal.ZERO) { sum, flow ->
+            val value = CashFlowEngine
+                .project(flow.amount, flow.period, flow.startsOn, flow.endsOn, month, now, zone)
+                .accrued
+            if (flow.direction == FlowDirection.INCOME) sum.add(value) else sum.subtract(value)
+        }
+        return if (accrued.signum() <= 0) BigDecimal.ZERO else accrued.multiply(share)
+    }
+
+    private fun FundMovementEntity.describe() = FundMovementResponse(
+        id = id,
+        fundId = fundId,
+        occurredOn = occurredOn,
+        direction = direction,
+        amount = amount,
+        note = note,
+    )
+
+    private fun List<FundMovementEntity>.total(direction: FundMovementDirection): BigDecimal =
+        filter { it.direction == direction }
+            .fold(BigDecimal.ZERO) { sum, it -> sum + it.amount }
 
     private fun LedgerRateBreakdown.toResponse() = LedgerRateResponse(
         perSecond = perSecond,
@@ -382,5 +562,12 @@ class LedgerService(
         const val SHARE_SCALE = 10
 
         val HUNDRED: java.math.BigDecimal = java.math.BigDecimal("100").setScale(PERCENT_SCALE)
+
+        /**
+         * How far back a fund's accumulated share is worked out. Ten years is far more than one
+         * could plausibly need, and it stops a bad `created_at` turning one read into an
+         * unbounded loop.
+         */
+        const val MAX_HISTORY_MONTHS = 120
     }
 }

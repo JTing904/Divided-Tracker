@@ -172,6 +172,32 @@ class LedgerViewModel(
 
     fun deleteFund(id: String) = perform { ledgerRepository.deleteFund(id) }
 
+    /**
+     * Records money going into or out of a fund.
+     *
+     * Never called on the person's behalf. The plan saying RM412 should reach the emergency
+     * fund is not the same as RM412 being in it, and only they know which happened.
+     */
+    fun moveFundMoney(
+        fundId: String,
+        direction: String,
+        amount: BigDecimal,
+        occurredOn: LocalDate? = null,
+        note: String? = null,
+        onSaved: () -> Unit = {},
+    ) = perform(onSaved) {
+        ledgerRepository.saveFundMovement(
+            fundId = fundId,
+            id = UUID.randomUUID().toString(),
+            direction = direction,
+            amount = amount,
+            occurredOn = occurredOn,
+            note = note,
+        )
+    }
+
+    fun deleteFundMovement(id: String) = perform { ledgerRepository.deleteFundMovement(id) }
+
     fun dismissActionError() = _state.update { it.copy(actionError = null) }
 
     private fun perform(onSuccess: () -> Unit = {}, block: suspend () -> AppResult<*>) {

@@ -101,6 +101,16 @@ interface DividendStreamApi {
     @DELETE("api/ledger/funds/{id}")
     suspend fun deleteFund(@Path("id") id: String)
 
+    /** Money into or out of a fund. A withdrawal past the balance is refused by the server. */
+    @POST("api/ledger/funds/{id}/movements")
+    suspend fun saveFundMovement(
+        @Path("id") id: String,
+        @Body request: SaveFundMovementRequest,
+    ): FundMovementDto
+
+    @DELETE("api/ledger/movements/{id}")
+    suspend fun deleteFundMovement(@Path("id") id: String)
+
     /**
      * Which build is serving, and which client release is current. Needs no session, and
      * touches no database -- so it answers even when the rest of the API cannot.

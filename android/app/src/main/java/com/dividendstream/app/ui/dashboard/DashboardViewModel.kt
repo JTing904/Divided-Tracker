@@ -12,6 +12,7 @@ import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
+import com.dividendstream.app.ui.ledger.LedgerStreams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -42,6 +43,8 @@ data class DashboardUiState(
      * first, and the ledger has its own tab to report its own problems on.
      */
     val ledger: LedgerDto? = null,
+    /** The ledger's flows as counter parameters, so the home screen can tick them too. */
+    val ledgerStreams: LedgerStreams = LedgerStreams(),
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
@@ -72,7 +75,20 @@ class DashboardViewModel(
     private fun loadLedger() {
         viewModelScope.launch {
             val result = ledgerRepository.ledger()
-            if (result is AppResult.Success) _state.update { it.copy(ledger = result.data.value) }
+            if (result is AppResult.Success) {
+                val loaded = result.data.value
+                _state.update {
+                    it.copy(
+                        ledger = loaded,
+                        ledgerStreams = LedgerStreams(
+                            income = loaded.flows.filter { f -> f.direction == "INCOME" }
+                                .mapNotNull { f -> f.toAccumulationStream() },
+                            expense = loaded.flows.filter { f -> f.direction == "EXPENSE" }
+                                .mapNotNull { f -> f.toAccumulationStream() },
+                        ),
+                    )
+                }
+            }
         }
     }
 

@@ -79,4 +79,24 @@ class LedgerController(private val ledgerService: LedgerService) {
         ledgerService.deleteFund(principal.userId, id)
         return ResponseEntity.noContent().build()
     }
+
+    /**
+     * Put money into a fund, or take some out. A withdrawal past the balance is refused, and
+     * the refusal says how much is actually there.
+     */
+    @PostMapping("/funds/{id}/movements")
+    fun saveFundMovement(
+        @AuthenticationPrincipal principal: AuthPrincipal,
+        @PathVariable("id") id: UUID,
+        @Valid @RequestBody request: SaveFundMovementRequest,
+    ): FundMovementResponse = ledgerService.saveFundMovement(principal.userId, id, request)
+
+    @DeleteMapping("/movements/{id}")
+    fun deleteFundMovement(
+        @AuthenticationPrincipal principal: AuthPrincipal,
+        @PathVariable("id") id: UUID,
+    ): ResponseEntity<Void> {
+        ledgerService.deleteFundMovement(principal.userId, id)
+        return ResponseEntity.noContent().build()
+    }
 }

@@ -18,7 +18,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,13 +43,13 @@ import com.dividendstream.app.ui.auth.LoginScreen
 import com.dividendstream.app.ui.auth.LoginViewModel
 import com.dividendstream.app.ui.auth.RegisterScreen
 import com.dividendstream.app.ui.auth.RegisterViewModel
-import com.dividendstream.app.ui.calendar.CalendarScreen
 import com.dividendstream.app.ui.calendar.CalendarViewModel
-import com.dividendstream.app.ui.dashboard.DashboardScreen
 import com.dividendstream.app.ui.dashboard.DashboardViewModel
+import com.dividendstream.app.ui.dividends.DividendSegment
+import com.dividendstream.app.ui.dividends.DividendsScreen
+import com.dividendstream.app.ui.home.HomeScreen
 import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
-import com.dividendstream.app.ui.history.HistoryScreen
 import com.dividendstream.app.ui.history.HistoryViewModel
 import com.dividendstream.app.ui.ledger.LedgerScreen
 import com.dividendstream.app.ui.ledger.LedgerViewModel
@@ -170,15 +173,55 @@ private fun SignedInApp(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Routes.DASHBOARD,
+            startDestination = Routes.HOME,
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
-            composable(Routes.DASHBOARD) {
+            composable(Routes.HOME) {
                 val viewModel: DashboardViewModel = viewModel(factory = factory)
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
-                    DashboardScreen(
+                    HomeScreen(
                         viewModel = viewModel,
+                        userName = userName,
+                        onOpenDividends = { navController.navigateToTab(BottomTab.Dividends) },
+                        onOpenLedger = { navController.navigateToTab(BottomTab.Ledger) },
+                    )
+                }
+            }
+
+            composable(Routes.DIVIDENDS) {
+                val dashboard: DashboardViewModel = viewModel(factory = factory)
+                val calendar: CalendarViewModel = viewModel(factory = factory)
+                val history: HistoryViewModel = viewModel(factory = factory)
+                var segment by rememberSaveable { mutableStateOf(DividendSegment.Live) }
+
+                // The spinner has to follow whichever view is on screen, and so does the pull.
+                val dashboardState by dashboard.state.collectAsStateWithLifecycle()
+                val calendarState by calendar.state.collectAsStateWithLifecycle()
+                val historyState by history.state.collectAsStateWithLifecycle()
+                val refreshing = when (segment) {
+                    DividendSegment.Live -> dashboardState.isRefreshing
+                    DividendSegment.Calendar -> calendarState.isRefreshing
+                    DividendSegment.History -> historyState.isRefreshing
+                }
+
+                PullToRefresh(
+                    isRefreshing = refreshing,
+                    onRefresh = {
+                        when (segment) {
+                            DividendSegment.Live -> dashboard.refresh(fromPull = true)
+                            DividendSegment.Calendar -> calendar.refresh(fromPull = true)
+                            DividendSegment.History -> history.refresh(fromPull = true)
+                        }
+                    },
+                ) {
+                    DividendsScreen(
+                        segment = segment,
+                        onSegmentChange = { segment = it },
+                        dashboardViewModel = dashboard,
+                        calendarViewModel = calendar,
+                        historyViewModel = history,
+                        serverClock = container.serverClock,
                         userName = userName,
                         onAddStock = { navController.navigate(Routes.ADD_STOCK) },
                         onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
@@ -199,24 +242,6 @@ private fun SignedInApp(
                 }
             }
 
-            composable(Routes.CALENDAR) {
-                val viewModel: CalendarViewModel = viewModel(factory = factory)
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
-                    CalendarScreen(
-                        viewModel = viewModel,
-                        onOpenStock = { symbol -> navController.navigate(Routes.stockDetail(symbol)) },
-                    )
-                }
-            }
-
-            composable(Routes.HISTORY) {
-                val viewModel: HistoryViewModel = viewModel(factory = factory)
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
-                    HistoryScreen(viewModel = viewModel)
-                }
-            }
 
             composable(Routes.LEDGER) {
                 val viewModel: LedgerViewModel = viewModel(factory = factory)
@@ -297,7 +322,7 @@ private fun PullToRefresh(
  */
 private fun NavHostController.navigateToTab(tab: BottomTab) {
     navigate(tab.route) {
-        popUpTo(Routes.DASHBOARD) { inclusive = tab.route == Routes.DASHBOARD }
+        popUpTo(Routes.HOME) { inclusive = tab.route == Routes.HOME }
         launchSingleTop = true
     }
 }

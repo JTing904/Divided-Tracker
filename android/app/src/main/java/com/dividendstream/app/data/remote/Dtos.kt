@@ -394,6 +394,41 @@ data class FundDto(
     val ratePerSecond: BigDecimal,
     val plannedThisMonth: BigDecimal,
     val accruedThisMonth: BigDecimal,
+    /**
+     * What the fund holds, as of `serverTime`. Fills by itself from the share; carries across
+     * months rather than resetting.
+     */
+    val balance: BigDecimal = BigDecimal.ZERO,
+    /**
+     * The settled part of [balance] -- earlier months, plus deposits, less withdrawals -- which
+     * does not move until the month ends. The client adds this month's still-growing share to
+     * it each frame, and so arrives at the same total the server would.
+     */
+    val carriedOver: BigDecimal = BigDecimal.ZERO,
+    val earmarkedEarlier: BigDecimal = BigDecimal.ZERO,
+    val paidIn: BigDecimal = BigDecimal.ZERO,
+    val takenOut: BigDecimal = BigDecimal.ZERO,
+    val movements: List<FundMovementDto> = emptyList(),
+)
+
+@Serializable
+data class FundMovementDto(
+    val id: String,
+    val fundId: String,
+    val occurredOn: LocalDate,
+    /** DEPOSIT or WITHDRAWAL. */
+    val direction: String,
+    val amount: BigDecimal,
+    val note: String? = null,
+)
+
+@Serializable
+data class SaveFundMovementRequest(
+    val id: String? = null,
+    val direction: String,
+    val amount: BigDecimal,
+    val occurredOn: LocalDate? = null,
+    val note: String? = null,
 )
 
 @Serializable
@@ -450,6 +485,7 @@ data class LedgerDto(
     val funds: List<FundDto> = emptyList(),
     val allocatedPercent: BigDecimal,
     val unallocatedPercent: BigDecimal,
+    val totalFundBalance: BigDecimal = BigDecimal.ZERO,
 
     val flows: List<CashFlowDto> = emptyList(),
     val entries: List<LedgerEntryDto> = emptyList(),

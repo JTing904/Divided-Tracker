@@ -92,6 +92,26 @@ data class SaveFundRequest(
     val position: Int? = null,
 )
 
+data class SaveFundMovementRequest(
+    /** See [SaveCashFlowRequest.id]: this is what stops a double tap moving the money twice. */
+    val id: UUID? = null,
+
+    @field:NotNull(message = "Say whether money is going in or coming out")
+    val direction: FundMovementDirection,
+
+    @field:NotNull(message = "An amount is required")
+    @field:DecimalMin(value = "0.01", message = "Enter an amount above zero")
+    @field:DecimalMax(value = "999999999.99", message = "That is more than we can track")
+    @field:Digits(integer = 9, fraction = 2, message = "An amount may have at most 2 decimal places")
+    val amount: BigDecimal,
+
+    /** Defaults to today on the server. */
+    val occurredOn: LocalDate? = null,
+
+    @field:Size(max = 200, message = "That note is too long")
+    val note: String? = null,
+)
+
 // --- responses ---------------------------------------------------------------
 
 /**
@@ -149,6 +169,46 @@ data class FundResponse(
     val plannedThisMonth: BigDecimal,
     /** Its share of the surplus accrued so far, at `serverTime`. */
     val accruedThisMonth: BigDecimal,
+
+    /**
+     * What the fund holds: everything the plan has put aside since it was created, plus
+     * anything paid in by hand, less everything taken out.
+     *
+     * This is the figure a person means by "how much is in my emergency fund". It fills by
+     * itself -- setting a share of 50% is an instruction, not a reminder to do it manually --
+     * and it carries across months rather than resetting on the 1st.
+     */
+    val balance: BigDecimal,
+
+    /**
+     * The part of [balance] that is settled and does not move until the month ends: earlier
+     * months, plus deposits, less withdrawals.
+     *
+     * Sent separately so the client can add this month's still-growing share to it once per
+     * frame and arrive at the same total the server would, rather than waiting for a refresh
+     * to see the fund move.
+     */
+    val carriedOver: BigDecimal,
+
+    /** What earlier months alone contributed. A projection; see [carriedOver]. */
+    val earmarkedEarlier: BigDecimal,
+
+    /** Money the person put in themselves, beyond the plan. A fact. */
+    val paidIn: BigDecimal,
+
+    /** Money the person spent out of the fund. A fact. */
+    val takenOut: BigDecimal,
+
+    val movements: List<FundMovementResponse>,
+)
+
+data class FundMovementResponse(
+    val id: UUID,
+    val fundId: UUID,
+    val occurredOn: LocalDate,
+    val direction: FundMovementDirection,
+    val amount: BigDecimal,
+    val note: String?,
 )
 
 /** A per-second figure restated over horizons a person thinks in, on the real calendar. */
@@ -217,6 +277,8 @@ data class LedgerResponse(
     val funds: List<FundResponse>,
     val allocatedPercent: BigDecimal,
     val unallocatedPercent: BigDecimal,
+    /** Everything sitting in the funds, across all of them. A fact, like each fund's balance. */
+    val totalFundBalance: BigDecimal,
 
     val flows: List<CashFlowResponse>,
     val entries: List<LedgerEntryResponse>,

@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,7 @@ import com.dividendstream.app.core.formatMoney
 import com.dividendstream.app.core.formatPercent
 import com.dividendstream.app.data.remote.CashFlowDto
 import com.dividendstream.app.data.remote.FundDto
+import com.dividendstream.app.data.remote.FundMovementDto
 import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LedgerEntryDto
 import com.dividendstream.app.data.remote.MonthlyLedgerTotalDto
@@ -167,7 +169,7 @@ fun LedgerScreen(
             item { AllocationBar(ledger) }
 
             if (ledger.funds.isEmpty()) {
-                item { HintCard("Split what is left into funds -- an emergency pot, a trip, an investment -- by percentage. Each one fills in real time.") }
+                item { HintCard("Split what is left into funds -- an emergency pot, a trip, an investment. Give each one a percentage and it fills itself, second by second, and keeps what it collected when the month turns over. Spend from it and the amount comes off.") }
             } else {
                 items(ledger.funds, key = { it.id }) { fund ->
                     FundRow(
@@ -176,6 +178,9 @@ fun LedgerScreen(
                         streams = state.streams,
                         clock = viewModel.serverClock,
                         onEdit = { editor = LedgerEditor.Fund(fund) },
+                        onMove = { direction ->
+                            editor = LedgerEditor.Movement(fund, direction)
+                        },
                         onDelete = { viewModel.deleteFund(fund.id) },
                     )
                 }
@@ -428,17 +433,21 @@ private fun FundRow(
     streams: LedgerStreams,
     clock: ServerClock,
     onEdit: () -> Unit,
+    onMove: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
     val net by rememberNetAccrued(streams, clock)
     // A fund takes its share of the surplus, and there is no share of a deficit.
     val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
-    val filled = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
+    val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
+    // The settled part plus this month's share, recomputed each frame. The same sum the
+    // server does, which is what stops the figure jumping when a refresh lands.
+    val holding = fund.carriedOver.add(accruing)
     val target = fund.plannedThisMonth
     val progress =
         if (target.signum() <= 0) 0f
-        else filled.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
+        else accruing.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
 
     DsCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -459,14 +468,16 @@ private fun FundRow(
                 )
             }
 
+            // The headline is what the fund holds, and it moves while you watch it: the share
+            // does the filling, so there is nothing to press.
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    filled.formatAmount(Precision.AMOUNT),
+                    holding.formatAmount(Precision.AMOUNT),
                     style = MonoFigure,
                     color = badge.tint,
                     maxLines = 1,
                 )
-                OverlineText("of ${target.formatMoney(ledger.currency)}")
+                OverlineText("in the fund")
             }
 
             IconButton(onClick = onDelete) {
@@ -485,6 +496,65 @@ private fun FundRow(
             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
             color = badge.tint,
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (target.signum() > 0) {
+                    "+${accruing.formatAmount(Precision.AMOUNT)} of " +
+                        "${target.formatMoney(ledger.currency)} this month"
+                } else {
+                    "Nothing to put aside this month"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Row {
+                AddChip("Spend", DividendColors.Danger) { onMove("WITHDRAWAL") }
+                Spacer(Modifier.width(8.dp))
+                AddChip("Add", DividendColors.Growth) { onMove("DEPOSIT") }
+            }
+        }
+
+        if (fund.movements.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            fund.movements.take(3).forEach { movement ->
+                MovementRow(movement, ledger.currency)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MovementRow(movement: FundMovementDto, currency: String) {
+    val deposit = movement.direction == "DEPOSIT"
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            movement.occurredOn.formatDayMonth(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            movement.note ?: if (deposit) "Put in" else "Taken out",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            (if (deposit) "+" else "-") + movement.amount.formatMoney(currency),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (deposit) DividendColors.Growth else DividendColors.Danger,
         )
     }
 }
@@ -594,20 +664,31 @@ private fun MonthRow(month: MonthlyLedgerTotalDto, currency: String) {
 
 // --- small pieces ------------------------------------------------------------
 
+/**
+ * The emoji on its tinted disc.
+ *
+ * Drawn as text, because that is what an emoji is. The font size is derived from the disc so
+ * the two scale together, and `platformStyle` turns off the extra line padding Android adds
+ * above and below a glyph -- without it the emoji sits visibly high in its circle.
+ */
 @Composable
 internal fun IconBadge(icon: LedgerIcon, size: androidx.compose.ui.unit.Dp = 40.dp) {
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(icon.tint.copy(alpha = 0.16f)),
+            .background(
+                Brush.linearGradient(
+                    listOf(icon.tint.copy(alpha = 0.26f), icon.tint.copy(alpha = 0.10f)),
+                ),
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon.icon,
-            contentDescription = null,
-            tint = icon.tint,
-            modifier = Modifier.size(size * 0.5f),
+        Text(
+            text = icon.emoji,
+            fontSize = with(LocalDensity.current) { (size * 0.5f).toSp() },
+            lineHeight = with(LocalDensity.current) { (size * 0.5f).toSp() },
+            textAlign = TextAlign.Center,
         )
     }
 }

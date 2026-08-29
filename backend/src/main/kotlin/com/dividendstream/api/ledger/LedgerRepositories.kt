@@ -35,3 +35,12 @@ interface FundRepository : JpaRepository<FundEntity, UUID> {
 
     fun findByIdAndUserId(id: UUID, userId: UUID): Optional<FundEntity>
 }
+
+interface FundMovementRepository : JpaRepository<FundMovementEntity, UUID> {
+
+    fun findAllByUserIdOrderByOccurredOnDescCreatedAtDesc(userId: UUID): List<FundMovementEntity>
+
+    fun findAllByFundIdOrderByOccurredOnDescCreatedAtDesc(fundId: UUID): List<FundMovementEntity>
+
+    fun findByIdAndUserId(id: UUID, userId: UUID): Optional<FundMovementEntity>
+}

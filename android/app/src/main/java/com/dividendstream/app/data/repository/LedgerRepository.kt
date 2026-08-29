@@ -5,9 +5,11 @@ import com.dividendstream.app.data.local.SnapshotCache
 import com.dividendstream.app.data.remote.CashFlowDto
 import com.dividendstream.app.data.remote.DividendStreamApi
 import com.dividendstream.app.data.remote.FundDto
+import com.dividendstream.app.data.remote.FundMovementDto
 import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LedgerEntryDto
 import com.dividendstream.app.data.remote.SaveCashFlowRequest
+import com.dividendstream.app.data.remote.SaveFundMovementRequest
 import com.dividendstream.app.data.remote.SaveFundRequest
 import com.dividendstream.app.data.remote.SaveLedgerEntryRequest
 import com.dividendstream.app.data.remote.apiCall
@@ -123,4 +125,27 @@ class LedgerRepository(
     }
 
     suspend fun deleteFund(id: String): AppResult<Unit> = apiCall(json) { api.deleteFund(id) }
+
+    suspend fun saveFundMovement(
+        fundId: String,
+        id: String?,
+        direction: String,
+        amount: BigDecimal,
+        occurredOn: LocalDate?,
+        note: String?,
+    ): AppResult<FundMovementDto> = apiCall(json) {
+        api.saveFundMovement(
+            fundId,
+            SaveFundMovementRequest(
+                id = id,
+                direction = direction,
+                amount = amount,
+                occurredOn = occurredOn,
+                note = note,
+            ),
+        )
+    }
+
+    suspend fun deleteFundMovement(id: String): AppResult<Unit> =
+        apiCall(json) { api.deleteFundMovement(id) }
 }

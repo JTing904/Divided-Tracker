@@ -1,84 +1,71 @@
 package com.dividendstream.app.ui.ledger
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.AirplanemodeActive
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.Checkroom
-import androidx.compose.material.icons.filled.CreditCard
-import androidx.compose.material.icons.filled.DirectionsBus
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LocalCafe
-import androidx.compose.material.icons.filled.LocalHospital
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PhoneIphone
-import androidx.compose.material.icons.filled.Pets
-import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.SelfImprovement
-import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material.icons.filled.Work
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * The named icons a ledger row or a fund can carry.
+ * The picture a ledger row or a fund carries.
  *
- * Stored as the [key] string, never as a drawable reference or a URL: the backend keeps a short
- * name it does not interpret, and the client resolves it. That means adding an icon is a client
- * release rather than a migration, and an unknown key from a newer client degrades to a neutral
- * shape on an older one instead of failing to draw.
+ * Emoji rather than vector icons, and rather than downloaded artwork. The reasons are worth
+ * writing down, because "just use images" looks like the obvious answer and is not:
  *
- * The colours are the point of the exercise as much as the shapes. A wall of identical rows is
- * what makes a ledger feel like homework; a row that is recognisably "food" or "transport" at a
- * glance is what makes it worth opening again tomorrow.
+ * - **Licensing.** Free icon sets almost all require attribution or forbid commercial use.
+ *   Emoji are supplied by the operating system and carry no such condition.
+ * - **The desktop build compiles the Android sources.** An Android drawable does not exist
+ *   there, so any bundled artwork would have to be duplicated per platform and kept in step.
+ *   A string of text renders identically in both.
+ * - **Size.** Thirty colour images is a megabyte in an APK that is already twenty; the whole
+ *   of this file is a few hundred bytes.
+ *
+ * The [key] is what is stored -- `"food"`, never the emoji itself. Storing the character would
+ * make the database depend on a Unicode version, and an unknown key from a newer client
+ * degrades to [Other] instead of drawing a box.
+ *
+ * [tint] is no longer a colour for the glyph, which supplies its own. It is the wash behind it
+ * and the colour of that row's figures, chosen to sit with the emoji rather than fight it.
  */
 enum class LedgerIcon(
     val key: String,
     val label: String,
-    val icon: ImageVector,
+    val emoji: String,
     val tint: Color,
 ) {
     // Money coming in.
-    Salary("salary", "Salary", Icons.Default.Work, Color(0xFF34D97B)),
-    Allowance("allowance", "Allowance", Icons.Default.CardGiftcard, Color(0xFF7BD97F)),
-    Business("business", "Business", Icons.Default.Storefront, Color(0xFF52C8A0)),
-    Investment("investment", "Investment", Icons.Default.TrendingUp, Color(0xFF4AE88C)),
-    Interest("interest", "Interest", Icons.Default.AccountBalance, Color(0xFF3FBF95)),
+    Salary("salary", "Salary", "💼", Color(0xFF34D97B)),
+    Allowance("allowance", "Allowance", "🎁", Color(0xFF7BD97F)),
+    Business("business", "Business", "🏪", Color(0xFF52C8A0)),
+    Investment("investment", "Investment", "📈", Color(0xFF4AE88C)),
+    Interest("interest", "Interest", "🏦", Color(0xFF3FBF95)),
+    Bonus("bonus", "Bonus", "🎉", Color(0xFF6FD9A8)),
 
     // Money going out.
-    Food("food", "Food", Icons.Default.Restaurant, Color(0xFFF5A15A)),
-    Coffee("coffee", "Coffee", Icons.Default.LocalCafe, Color(0xFFC98A5B)),
-    Rent("rent", "Rent", Icons.Default.Home, Color(0xFF7E8CF0)),
-    Transport("transport", "Transport", Icons.Default.DirectionsBus, Color(0xFF5AB2F5)),
-    Car("car", "Car", Icons.Default.DirectionsCar, Color(0xFF4F9BE8)),
-    Bills("bills", "Bills", Icons.Default.Bolt, Color(0xFFF5C451)),
-    Phone("phone", "Phone", Icons.Default.PhoneIphone, Color(0xFF9C8CF0)),
-    Shopping("shopping", "Shopping", Icons.Default.ShoppingBag, Color(0xFFEF7FA8)),
-    Clothes("clothes", "Clothes", Icons.Default.Checkroom, Color(0xFFE08AC0)),
-    Health("health", "Health", Icons.Default.LocalHospital, Color(0xFFEF5350)),
-    Fun("fun", "Fun", Icons.Default.Movie, Color(0xFFB07BF0)),
-    Study("study", "Study", Icons.Default.School, Color(0xFF6FA8F5)),
-    Pets("pets", "Pets", Icons.Default.Pets, Color(0xFFD9A05B)),
-    Subscription("subscription", "Subscription", Icons.Default.CreditCard, Color(0xFF8E9BAE)),
+    Food("food", "Food", "🍜", Color(0xFFF5A15A)),
+    Coffee("coffee", "Coffee", "☕", Color(0xFFC98A5B)),
+    Groceries("groceries", "Groceries", "🛒", Color(0xFFE8A85A)),
+    Rent("rent", "Rent", "🏠", Color(0xFF7E8CF0)),
+    Transport("transport", "Transport", "🚌", Color(0xFF5AB2F5)),
+    Car("car", "Car", "🚗", Color(0xFF4F9BE8)),
+    Fuel("fuel", "Fuel", "⛽", Color(0xFF6EA8D8)),
+    Bills("bills", "Bills", "⚡", Color(0xFFF5C451)),
+    Phone("phone", "Phone", "📱", Color(0xFF9C8CF0)),
+    Shopping("shopping", "Shopping", "🛍️", Color(0xFFEF7FA8)),
+    Clothes("clothes", "Clothes", "👕", Color(0xFFE08AC0)),
+    Health("health", "Health", "💊", Color(0xFFEF5350)),
+    Fun("fun", "Fun", "🎬", Color(0xFFB07BF0)),
+    Study("study", "Study", "🎓", Color(0xFF6FA8F5)),
+    Pets("pets", "Pets", "🐾", Color(0xFFD9A05B)),
+    Subscription("subscription", "Subscription", "💳", Color(0xFF8E9BAE)),
+    Gift("gift", "Gift", "💝", Color(0xFFEF8FB8)),
 
     // Funds.
-    Emergency("emergency", "Emergency", Icons.Default.Shield, Color(0xFF5AB2F5)),
-    Savings("savings", "Savings", Icons.Default.Savings, Color(0xFF34D97B)),
-    Travel("travel", "Travel", Icons.Default.AirplanemodeActive, Color(0xFF52C8E8)),
-    Family("family", "Family", Icons.Default.Favorite, Color(0xFFEF7FA8)),
-    Retirement("retirement", "Retirement", Icons.Default.SelfImprovement, Color(0xFFB07BF0)),
+    Emergency("emergency", "Emergency", "🛡️", Color(0xFF5AB2F5)),
+    Savings("savings", "Savings", "🐷", Color(0xFF34D97B)),
+    Travel("travel", "Travel", "✈️", Color(0xFF52C8E8)),
+    Family("family", "Family", "❤️", Color(0xFFEF7FA8)),
+    Retirement("retirement", "Retirement", "🌴", Color(0xFFB07BF0)),
+    House("house", "House", "🏡", Color(0xFF8CA8F0)),
 
     /** The fallback, and what an unrecognised key resolves to. */
-    Other("other", "Other", Icons.Default.Category, Color(0xFF8E9BAE)),
+    Other("other", "Other", "📦", Color(0xFF8E9BAE)),
     ;
 
     companion object {
@@ -90,17 +77,18 @@ enum class LedgerIcon(
             entries.firstOrNull { it.key.equals(key?.trim(), ignoreCase = true) } ?: Other
 
         /** Offered when adding income. Order is the order they appear in the picker. */
-        val income: List<LedgerIcon> = listOf(Salary, Allowance, Business, Investment, Interest, Other)
+        val income: List<LedgerIcon> =
+            listOf(Salary, Allowance, Business, Investment, Interest, Bonus, Other)
 
         /** Offered when adding an outgoing. */
         val expense: List<LedgerIcon> = listOf(
-            Food, Coffee, Rent, Transport, Car, Bills, Phone,
-            Shopping, Clothes, Health, Fun, Study, Pets, Subscription, Other,
+            Food, Coffee, Groceries, Rent, Transport, Car, Fuel, Bills, Phone,
+            Shopping, Clothes, Health, Fun, Study, Pets, Subscription, Gift, Other,
         )
 
         /** Offered when creating a fund. */
         val fund: List<LedgerIcon> = listOf(
-            Emergency, Savings, Travel, Family, Retirement, Investment, Study, Other,
+            Emergency, Savings, Travel, Family, House, Retirement, Investment, Study, Other,
         )
     }
 }

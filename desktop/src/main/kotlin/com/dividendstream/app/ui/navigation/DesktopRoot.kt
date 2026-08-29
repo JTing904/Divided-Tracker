@@ -48,13 +48,13 @@ import com.dividendstream.app.ui.auth.LoginScreen
 import com.dividendstream.app.ui.auth.LoginViewModel
 import com.dividendstream.app.ui.auth.RegisterScreen
 import com.dividendstream.app.ui.auth.RegisterViewModel
-import com.dividendstream.app.ui.calendar.CalendarScreen
 import com.dividendstream.app.ui.calendar.CalendarViewModel
-import com.dividendstream.app.ui.dashboard.DashboardScreen
 import com.dividendstream.app.ui.dashboard.DashboardViewModel
+import com.dividendstream.app.ui.dividends.DividendSegment
+import com.dividendstream.app.ui.dividends.DividendsScreen
+import com.dividendstream.app.ui.home.HomeScreen
 import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
-import com.dividendstream.app.ui.history.HistoryScreen
 import com.dividendstream.app.ui.history.HistoryViewModel
 import com.dividendstream.app.ui.ledger.LedgerScreen
 import com.dividendstream.app.ui.ledger.LedgerViewModel
@@ -70,10 +70,9 @@ import com.dividendstream.app.ui.rememberAppContainer
  * destination is handled and that the detail screen cannot exist without a symbol.
  */
 private sealed interface Destination {
-    data object Dashboard : Destination
+    data object Home : Destination
+    data object Dividends : Destination
     data object Portfolio : Destination
-    data object Calendar : Destination
-    data object History : Destination
     data object Ledger : Destination
     data object AddStock : Destination
     data object Profile : Destination
@@ -81,19 +80,17 @@ private sealed interface Destination {
 }
 
 private fun Destination.tab(): BottomTab? = when (this) {
-    Destination.Dashboard -> BottomTab.Home
+    Destination.Home -> BottomTab.Home
+    Destination.Dividends -> BottomTab.Dividends
     Destination.Portfolio -> BottomTab.Portfolio
-    Destination.Calendar -> BottomTab.Calendar
-    Destination.History -> BottomTab.History
     Destination.Ledger -> BottomTab.Ledger
     else -> null
 }
 
 private fun BottomTab.destination(): Destination = when (this) {
-    BottomTab.Home -> Destination.Dashboard
+    BottomTab.Home -> Destination.Home
+    BottomTab.Dividends -> Destination.Dividends
     BottomTab.Portfolio -> Destination.Portfolio
-    BottomTab.Calendar -> Destination.Calendar
-    BottomTab.History -> Destination.History
     BottomTab.Ledger -> Destination.Ledger
 }
 
@@ -102,7 +99,7 @@ private fun BottomTab.destination(): Destination = when (this) {
  * a string-route indirection to solve problems this window does not have.
  */
 private class DesktopNavigator {
-    val stack: SnapshotStateList<Destination> = mutableStateListOf(Destination.Dashboard)
+    val stack: SnapshotStateList<Destination> = mutableStateListOf(Destination.Home)
     val current: Destination get() = stack.last()
 
     fun push(destination: Destination) {
@@ -203,11 +200,41 @@ private fun SignedInApp(
             // available, gets centred, and the screens inside then draw past its right edge.
             Box(Modifier.widthIn(max = 1000.dp).fillMaxWidth().fillMaxHeight()) {
                 when (val destination = current) {
-                    Destination.Dashboard -> {
+                    Destination.Home -> {
                         val viewModel: DashboardViewModel = viewModel(factory = factory)
                         RefreshOnEnter(viewModel::refresh)
-                        DashboardScreen(
+                        HomeScreen(
                             viewModel = viewModel,
+                            userName = userName,
+                            onOpenDividends = { navigator.selectTab(BottomTab.Dividends) },
+                            onOpenLedger = { navigator.selectTab(BottomTab.Ledger) },
+                        )
+                    }
+
+                    Destination.Dividends -> {
+                        val dashboard: DashboardViewModel = viewModel(factory = factory)
+                        val calendar: CalendarViewModel = viewModel(factory = factory)
+                        val history: HistoryViewModel = viewModel(factory = factory)
+                        var segment by remember { mutableStateOf(DividendSegment.Live) }
+
+                        // One store for the whole window means these ViewModels outlive the
+                        // destination, so entering the tab has to refetch. Keyed on the segment
+                        // as well, so switching to the calendar reloads the calendar.
+                        LaunchedEffect(segment) {
+                            when (segment) {
+                                DividendSegment.Live -> dashboard.refresh()
+                                DividendSegment.Calendar -> calendar.refresh()
+                                DividendSegment.History -> history.refresh()
+                            }
+                        }
+
+                        DividendsScreen(
+                            segment = segment,
+                            onSegmentChange = { segment = it },
+                            dashboardViewModel = dashboard,
+                            calendarViewModel = calendar,
+                            historyViewModel = history,
+                            serverClock = container.serverClock,
                             userName = userName,
                             onAddStock = { navigator.push(Destination.AddStock) },
                             onOpenStock = { navigator.push(Destination.Detail(it)) },
@@ -225,20 +252,6 @@ private fun SignedInApp(
                         )
                     }
 
-                    Destination.Calendar -> {
-                        val viewModel: CalendarViewModel = viewModel(factory = factory)
-                        RefreshOnEnter(viewModel::refresh)
-                        CalendarScreen(
-                            viewModel = viewModel,
-                            onOpenStock = { navigator.push(Destination.Detail(it)) },
-                        )
-                    }
-
-                    Destination.History -> {
-                        val viewModel: HistoryViewModel = viewModel(factory = factory)
-                        RefreshOnEnter(viewModel::refresh)
-                        HistoryScreen(viewModel = viewModel)
-                    }
 
                     Destination.Ledger -> {
                         val viewModel: LedgerViewModel = viewModel(factory = factory)

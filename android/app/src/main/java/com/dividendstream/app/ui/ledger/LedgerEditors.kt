@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dividendstream.app.core.toPriceInput
 import com.dividendstream.app.data.remote.CashFlowDto
 import com.dividendstream.app.data.remote.FundDto
@@ -54,6 +55,9 @@ sealed interface LedgerEditor {
     data class Entry(val direction: String) : LedgerEditor
 
     data class Fund(val existing: FundDto? = null) : LedgerEditor
+
+    /** Money into or out of one fund. [direction] is DEPOSIT or WITHDRAWAL. */
+    data class Movement(val fund: FundDto, val direction: String) : LedgerEditor
 }
 
 @Composable
@@ -67,6 +71,7 @@ fun LedgerEditorDialog(
         is LedgerEditor.Flow -> FlowDialog(editor, viewModel, isSaving, onDismiss)
         is LedgerEditor.Entry -> EntryDialog(editor, viewModel, isSaving, onDismiss)
         is LedgerEditor.Fund -> FundDialog(editor, viewModel, isSaving, onDismiss)
+        is LedgerEditor.Movement -> MovementDialog(editor, viewModel, isSaving, onDismiss)
     }
 }
 
@@ -323,6 +328,98 @@ private fun FundDialog(
     }
 }
 
+// --- money into or out of a fund ---------------------------------------------
+
+@Composable
+private fun MovementDialog(
+    editor: LedgerEditor.Movement,
+    viewModel: LedgerViewModel,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+) {
+    val fund = editor.fund
+    val depositing = editor.direction == "DEPOSIT"
+
+    var amount by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var occurredOn by remember { mutableStateOf(LocalDate.now().toString()) }
+
+    val parsedAmount = amount.toAmountOrNull()
+    val parsedDate = occurredOn.toDateOrNull()
+    val tooMuch = !depositing && parsedAmount != null && parsedAmount > fund.balance
+
+    EditorScaffold(
+        title = if (depositing) "Add to ${fund.name}" else "Spend from ${fund.name}",
+        confirmLabel = if (isSaving) "Saving…" else if (depositing) "Add" else "Spend",
+        canConfirm = parsedAmount != null && parsedDate != null && !tooMuch && !isSaving,
+        onConfirm = {
+            viewModel.moveFundMoney(
+                fundId = fund.id,
+                direction = editor.direction,
+                amount = parsedAmount!!,
+                occurredOn = parsedDate,
+                note = note.trim().takeIf { it.isNotEmpty() },
+                onSaved = onDismiss,
+            )
+        },
+        onDismiss = onDismiss,
+    ) {
+        Text(
+            if (depositing) {
+                "This fund already fills itself with ${fund.percent.toPlainString()}% of what " +
+                    "is left over. Add money here only when you put in something extra."
+            } else {
+                "There is about ${fund.balance.setScale(2, java.math.RoundingMode.DOWN)
+                    .toPlainString()} in this fund."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(14.dp))
+
+        DsTextField(
+            label = "Amount",
+            value = amount,
+            onValueChange = { amount = it },
+            placeholder = "0.00",
+            keyboardType = KeyboardType.Decimal,
+            isError = tooMuch,
+            supportingText = if (tooMuch) "That is more than the fund holds." else null,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        DsTextField(
+            label = "Note",
+            value = note,
+            onValueChange = { note = it },
+            placeholder = if (depositing) "Optional" else "What was it for?",
+        )
+        Spacer(Modifier.height(16.dp))
+
+        OverlineText("When")
+        Spacer(Modifier.height(8.dp))
+        ChoiceRow(
+            options = listOf(
+                LocalDate.now() to "Today",
+                LocalDate.now().minusDays(1) to "Yesterday",
+            ),
+            selected = parsedDate,
+            label = { it.second },
+            key = { it.first },
+            onSelect = { occurredOn = it.first.toString() },
+        )
+        Spacer(Modifier.height(10.dp))
+        DsTextField(
+            label = "Or a date",
+            value = occurredOn,
+            onValueChange = { occurredOn = it },
+            placeholder = "YYYY-MM-DD",
+            imeAction = ImeAction.Done,
+            isError = occurredOn.isNotBlank() && parsedDate == null,
+        )
+    }
+}
+
 // --- shared pieces -----------------------------------------------------------
 
 @Composable
@@ -398,11 +495,10 @@ private fun IconPicker(
                             .clickable { onSelect(option) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            option.icon,
-                            contentDescription = option.label,
-                            tint = option.tint,
-                            modifier = Modifier.size(21.dp),
+                        Text(
+                            text = option.emoji,
+                            fontSize = 21.sp,
+                            lineHeight = 21.sp,
                         )
                     }
                     Spacer(Modifier.height(4.dp))
