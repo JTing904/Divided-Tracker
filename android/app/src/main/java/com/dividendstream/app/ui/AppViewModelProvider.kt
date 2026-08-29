@@ -54,7 +54,11 @@ object AppViewModelProvider {
         }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
-        initializer { LedgerViewModel(container.ledgerRepository, container.serverClock) }
+        initializer { LedgerViewModel(
+                container.ledgerRepository,
+                container.settingsStore,
+                container.serverClock,
+            ) }
         initializer {
             ProfileViewModel(
                 container.authRepository,

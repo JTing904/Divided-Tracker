@@ -71,6 +71,17 @@ class LedgerService(
         val actualIncome = entries.sumAmount(FlowDirection.INCOME)
         val actualExpense = entries.sumAmount(FlowDirection.EXPENSE)
 
+        // A record dated later in the month has not happened yet, and must not count towards
+        // anything describing now. Writing down next Friday's rent in advance is a sensible
+        // thing to do, and it used to take the money out of a fund four days early -- a figure
+        // labelled "in the fund" would have included, or spent, money that had not moved.
+        //
+        // The projection below still counts it, because a projection of the whole month is
+        // exactly where a payment due on the 31st belongs.
+        val settled = entries.filter { !it.occurredOn.isAfter(LocalDate.ofInstant(now, zone)) }
+        val settledIncome = settled.sumAmount(FlowDirection.INCOME)
+        val settledExpense = settled.sumAmount(FlowDirection.EXPENSE)
+
         // What is left counts the one-off records as well as the repeating ones. Recording a
         // RM12 lunch and watching the figure not move made the two halves of the screen look
         // unrelated; a person writing down what they spent means it to come off what they have.
@@ -78,7 +89,7 @@ class LedgerService(
         // Nothing deduplicates: entering the rent as a record *and* as a monthly outgoing
         // counts it twice. The two sections say which is which, and guessing that two amounts
         // are the same payment would be a worse failure than the one it prevents.
-        val recordedNet = actualIncome.subtract(actualExpense)
+        val recordedNet = settledIncome.subtract(settledExpense)
         val netAccrued = accruedIncome.subtract(accruedExpense).add(recordedNet)
 
         val plannedIncome = described.sumExpected(FlowDirection.INCOME).add(actualIncome)
@@ -88,7 +99,7 @@ class LedgerService(
         // The funds are answered from the month, always. Their share is a share of a month's
         // surplus, and switching the screen to today must not make a fund appear to shrink.
         val monthly = if (period == LedgerPeriod.MONTH) {
-            MonthFigures(netRate, plannedSurplus, netAccrued, recordedNet)
+            MonthFigures(netRate, plannedSurplus, netAccrued)
         } else {
             monthFigures(userId, flows, month, now, zone)
         }
@@ -142,7 +153,7 @@ class LedgerService(
 
             keptBeforeThisMonth = Money.amount(keptBeforeThisMonth),
             monthNetAccrued = Money.accrual(monthly.netAccrued),
-            monthRecordedNet = Money.amount(monthly.recorded),
+            monthNetRatePerSecond = Money.rate(monthly.netRate),
             keptSoFar = Money.accrual(keptBeforeThisMonth.add(monthly.netAccrued)),
 
             funds = describedFunds,
@@ -212,18 +223,10 @@ class LedgerService(
 
     /** The month's own figures, for the funds, when the screen is showing a day. */
     private data class MonthFigures(
+        /** Per second, from the flows' own periods. The same in either view. */
         val netRate: BigDecimal,
         val plannedSurplus: BigDecimal,
         val netAccrued: BigDecimal,
-        /**
-         * What was written down in the month, on its own.
-         *
-         * Already inside [netAccrued]. Reported separately because the client cannot work it
-         * back out: it ticks the flows from their own parameters, and a figure that is a
-         * moving part plus a fixed part has to arrive as two numbers or the client can only
-         * draw the moving one.
-         */
-        val recorded: BigDecimal,
     )
 
     private fun monthFigures(
@@ -239,8 +242,14 @@ class LedgerService(
             .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
                 userId, from, LocalDate.ofInstant(month.end.minusSeconds(1), zone),
             )
+        // The projection counts everything written down in the month, including what is
+        // dated later in it: a payment due on the 31st belongs in a projection of the month.
         val recorded = entries.sumAmount(FlowDirection.INCOME)
             .subtract(entries.sumAmount(FlowDirection.EXPENSE))
+        // What has accrued, however, counts only what has actually happened.
+        val settled = entries.filter { !it.occurredOn.isAfter(LocalDate.ofInstant(now, zone)) }
+        val settledNet = settled.sumAmount(FlowDirection.INCOME)
+            .subtract(settled.sumAmount(FlowDirection.EXPENSE))
 
         return MonthFigures(
             netRate = described.sumRate(FlowDirection.INCOME, now)
@@ -250,8 +259,7 @@ class LedgerService(
                 .add(recorded),
             netAccrued = described.sumAccrued(FlowDirection.INCOME)
                 .subtract(described.sumAccrued(FlowDirection.EXPENSE))
-                .add(recorded),
-            recorded = recorded,
+                .add(settledNet),
         )
     }
 

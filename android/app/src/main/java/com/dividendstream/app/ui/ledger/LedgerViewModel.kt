@@ -7,9 +7,11 @@ import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.toAccumulationStream
+import com.dividendstream.app.data.local.SettingsStore
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -28,6 +30,12 @@ import java.util.UUID
 enum class LedgerPeriod(val wire: String, val label: String) {
     Day("DAY", "Today"),
     Month("MONTH", "This month"),
+    ;
+
+    companion object {
+        /** The month, for anything unrecognised: it is the view the rest of the screen assumes. */
+        fun of(wire: String?): LedgerPeriod = entries.firstOrNull { it.wire == wire } ?: Month
+    }
 }
 
 /** How the records are ordered. */
@@ -132,6 +140,7 @@ data class LedgerUiState(
 
 class LedgerViewModel(
     private val ledgerRepository: LedgerRepository,
+    private val settingsStore: SettingsStore,
     val serverClock: ServerClock,
 ) : ViewModel() {
 
@@ -139,13 +148,22 @@ class LedgerViewModel(
     val state = _state.asStateFlow()
 
     init {
-        refresh()
+        // The stored period is read before the first fetch rather than after it. This view
+        // model is rebuilt every time the tab is entered, so choosing Today and coming back to
+        // find This month meant the choice never survived leaving the screen; fetching the
+        // month first and correcting afterwards would trade that for a visible flicker and
+        // two requests.
+        viewModelScope.launch {
+            _state.update { it.copy(period = LedgerPeriod.of(settingsStore.ledgerPeriod.first())) }
+            refresh()
+        }
     }
 
     /** Switching period reloads: the server measures the figures, not the screen. */
     fun setPeriod(period: LedgerPeriod) {
         if (_state.value.period == period) return
         _state.update { it.copy(period = period) }
+        viewModelScope.launch { settingsStore.setLedgerPeriod(period.wire) }
         refresh()
     }
 

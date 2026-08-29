@@ -27,7 +27,21 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit { it[KEY_THEME] = preference.key }
     }
 
+    /**
+     * Which stretch of time the ledger was last showing, as its wire value.
+     *
+     * A string rather than the enum: the enum belongs to the ledger screen, and a storage
+     * class that has to import a screen's types to save a preference has the dependency the
+     * wrong way round. Null when nothing has been chosen yet.
+     */
+    val ledgerPeriod: Flow<String?> = context.settingsDataStore.data.map { it[KEY_LEDGER_PERIOD] }
+
+    suspend fun setLedgerPeriod(wire: String) {
+        context.settingsDataStore.edit { it[KEY_LEDGER_PERIOD] = wire }
+    }
+
     private companion object {
         val KEY_THEME = stringPreferencesKey("theme")
+        val KEY_LEDGER_PERIOD = stringPreferencesKey("ledger_period")
     }
 }

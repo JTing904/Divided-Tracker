@@ -4,6 +4,7 @@ import com.dividendstream.api.support.IntegrationTest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,6 +18,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.YearMonth
 import java.util.UUID
 
 @IntegrationTest
@@ -373,10 +376,41 @@ class LedgerIntegrationTest {
         assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("100.00"))
         assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
 
-        // The client redraws the share every frame from the flows, which tick, plus the part
-        // that does not. Without this field it can only draw the ticking half, and every fund
-        // reads short by its cut of everything written down.
-        assertThat(body["monthRecordedNet"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+        // The client redraws the share every frame from the month's own figures rather than
+        // from the flows, so it needs the month's total and the month's rate.
+        assertThat(body["monthNetAccrued"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+    }
+
+    @Test
+    @DisplayName("a payment written down for later in the month has not happened yet")
+    fun `a future record is projected but not accrued`() {
+        val today = LocalDate.now()
+        val lastDay = YearMonth.from(today).atEndOfMonth()
+        // On the last day of a month there is no "later this month" to write down.
+        assumeTrue(today.isBefore(lastDay), "no future day left in this month")
+
+        val token = register("future@example.com")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+        saveEntry(
+            token,
+            """{"direction":"EXPENSE","amount":"500.00","category":"rent","occurredOn":"$lastDay"}""",
+        )
+
+        val body = ledger(token)
+        val fund = body["funds"][0]
+
+        // The money has not left yet, so nothing may have come out of the fund on account of
+        // it, and nothing may have been added to what is left over.
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(body["netAccrued"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(body["recordedNet"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+
+        // The projection is exactly where a payment due on the last day belongs, and the
+        // record itself is still listed: writing it down early is the point of writing it
+        // down early.
+        assertThat(body["plannedExpense"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(body["actualExpense"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(body["entries"]).hasSize(1)
     }
 
     @Test
@@ -392,7 +426,7 @@ class LedgerIntegrationTest {
         // Switching to today must not make a fund appear to shrink, so both the fund and the
         // figure the client rebuilds it from stay the month's.
         assertThat(day["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
-        assertThat(day["monthRecordedNet"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+        assertThat(day["monthNetAccrued"].money()).isEqualByComparingTo(BigDecimal("200.00"))
     }
 
     @Test

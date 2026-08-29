@@ -35,11 +35,34 @@ class SettingsStore(private val directory: Path = AppPaths.state) {
         }
     }
 
+    /** See the Android store: a string, so this class need not know the ledger's types. */
+    private val period = MutableStateFlow(
+        runCatching { Files.readString(directory.resolve(PERIOD_FILE)).trim().ifBlank { null } }
+            .getOrNull(),
+    )
+
+    val ledgerPeriod: Flow<String?> = period.asStateFlow()
+
+    suspend fun setLedgerPeriod(wire: String) {
+        period.value = wire
+        withContext(Dispatchers.IO) { writeLine(PERIOD_FILE, wire) }
+    }
+
     private fun readFromDisk(): ThemePreference =
         runCatching { ThemePreference.of(Files.readString(directory.resolve(FILE)).trim()) }
             .getOrDefault(ThemePreference.System)
 
+    /** Written through a temporary file, so a crash mid-write cannot leave half a value. */
+    private fun writeLine(name: String, value: String) {
+        Files.createDirectories(directory)
+        val target = directory.resolve(name)
+        val temp = directory.resolve("$name.tmp")
+        Files.writeString(temp, value)
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+    }
+
     private companion object {
         const val FILE = "theme"
+        const val PERIOD_FILE = "ledger-period"
     }
 }

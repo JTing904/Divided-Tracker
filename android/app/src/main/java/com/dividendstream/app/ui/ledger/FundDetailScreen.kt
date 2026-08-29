@@ -229,7 +229,9 @@ private fun FundBalanceCard(
     clock: ServerClock,
 ) {
     val badge = LedgerIcon.of(fund.icon)
-    val net by rememberFundSurplus(streams, ledger.monthRecordedNet, clock)
+    val net by rememberMonthNet(
+        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
+    )
     val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
     val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
     val holding = fund.carriedOver.add(accruing)

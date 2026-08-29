@@ -223,7 +223,18 @@ fun LedgerScreen(
                     )
                 }
             } else {
-                if (state.period == LedgerPeriod.Month) {
+                if (state.period == LedgerPeriod.Day) {
+                    // The day view is answered with one day's records, so there is nothing to
+                    // shade thirty-one cells with. It said so by vanishing, which reads as a
+                    // fault rather than as an answer -- more so now that the choice of period
+                    // is remembered, and someone who picked Today would never see it again.
+                    item {
+                        HintCard(
+                            "The calendar covers a whole month. Switch to This month above to " +
+                                "browse it.",
+                        )
+                    }
+                } else {
                     item {
                         SpendingCalendar(
                             month = ledger.month,
@@ -503,7 +514,9 @@ private fun CashFlowRow(
 @Composable
 private fun FundTotalCard(state: LedgerUiState, clock: ServerClock) {
     val ledger = state.ledger ?: return
-    val net by rememberFundSurplus(state.streams, ledger.monthRecordedNet, clock)
+    val net by rememberMonthNet(
+        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
+    )
     val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net
     val total = remember(ledger.funds) { ledger.funds }
         .fold(BigDecimal.ZERO) { sum, fund ->
@@ -618,7 +631,9 @@ private fun FundRow(
     onOpen: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
-    val net by rememberFundSurplus(streams, ledger.monthRecordedNet, clock)
+    val net by rememberMonthNet(
+        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
+    )
     // A fund takes its share of the surplus, and there is no share of a deficit.
     val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
     val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
