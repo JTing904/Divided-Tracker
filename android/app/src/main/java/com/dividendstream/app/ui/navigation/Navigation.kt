@@ -22,7 +22,12 @@ object Routes {
     const val STOCK_DETAIL_ROUTE = "stock/{symbol}"
     const val STOCK_DETAIL_ARG = "symbol"
 
+    const val FUND_DETAIL_ROUTE = "fund/{fundId}"
+    const val FUND_DETAIL_ARG = "fundId"
+
     fun stockDetail(symbol: String): String = "stock/$symbol"
+
+    fun fundDetail(fundId: String): String = "fund/$fundId"
 }
 
 /**

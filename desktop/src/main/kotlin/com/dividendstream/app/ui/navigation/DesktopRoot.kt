@@ -56,6 +56,7 @@ import com.dividendstream.app.ui.home.HomeScreen
 import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
 import com.dividendstream.app.ui.history.HistoryViewModel
+import com.dividendstream.app.ui.ledger.FundDetailScreen
 import com.dividendstream.app.ui.ledger.LedgerScreen
 import com.dividendstream.app.ui.ledger.LedgerViewModel
 import com.dividendstream.app.ui.portfolio.PortfolioScreen
@@ -77,6 +78,7 @@ private sealed interface Destination {
     data object AddStock : Destination
     data object Profile : Destination
     data class Detail(val symbol: String) : Destination
+    data class FundDetail(val fundId: String) : Destination
 }
 
 private fun Destination.tab(): BottomTab? = when (this) {
@@ -254,7 +256,22 @@ private fun SignedInApp(
                     Destination.Ledger -> {
                         val viewModel: LedgerViewModel = viewModel(factory = factory)
                         RefreshOnEnter(viewModel::refresh)
-                        LedgerScreen(viewModel = viewModel)
+                        LedgerScreen(
+                            viewModel = viewModel,
+                            onOpenFund = { navigator.push(Destination.FundDetail(it)) },
+                        )
+                    }
+
+                    is Destination.FundDetail -> {
+                        // One store for the whole window, so this is the same instance the
+                        // list behind it is using -- which is what keeps a fund's balance
+                        // and the surplus it takes its share of from disagreeing.
+                        val viewModel: LedgerViewModel = viewModel(factory = factory)
+                        FundDetailScreen(
+                            viewModel = viewModel,
+                            fundId = destination.fundId,
+                            onBack = navigator::pop,
+                        )
                     }
 
                     Destination.Profile -> {

@@ -51,6 +51,7 @@ import com.dividendstream.app.ui.home.HomeScreen
 import com.dividendstream.app.ui.detail.HoldingDetailScreen
 import com.dividendstream.app.ui.detail.HoldingDetailViewModel
 import com.dividendstream.app.ui.history.HistoryViewModel
+import com.dividendstream.app.ui.ledger.FundDetailScreen
 import com.dividendstream.app.ui.ledger.LedgerScreen
 import com.dividendstream.app.ui.ledger.LedgerViewModel
 import com.dividendstream.app.ui.portfolio.PortfolioScreen
@@ -246,8 +247,28 @@ private fun SignedInApp(
                 val viewModel: LedgerViewModel = viewModel(factory = factory)
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 PullToRefresh(state.isRefreshing, { viewModel.refresh(fromPull = true) }) {
-                    LedgerScreen(viewModel = viewModel)
+                    LedgerScreen(
+                        viewModel = viewModel,
+                        onOpenFund = { navController.navigate(Routes.fundDetail(it)) },
+                    )
                 }
+            }
+
+            composable(
+                route = Routes.FUND_DETAIL_ROUTE,
+                arguments = listOf(navArgument(Routes.FUND_DETAIL_ARG) { type = NavType.StringType }),
+            ) { entry ->
+                // The ledger tab's ViewModel, not a second one. A fund's balance is its share
+                // of the surplus the list is already showing, so a separate fetch would give
+                // this screen its own idea of that surplus -- and spending from a fund would
+                // leave the list behind it stale until something else refreshed it.
+                val parent = remember(entry) { navController.getBackStackEntry(Routes.LEDGER) }
+                val viewModel: LedgerViewModel = viewModel(parent, factory = factory)
+                FundDetailScreen(
+                    viewModel = viewModel,
+                    fundId = entry.arguments?.getString(Routes.FUND_DETAIL_ARG).orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
             }
 
             composable(Routes.PROFILE) {

@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -85,6 +86,7 @@ import java.util.Locale
 @Composable
 fun LedgerScreen(
     viewModel: LedgerViewModel,
+    onOpenFund: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -182,23 +184,26 @@ fun LedgerScreen(
                         ledger = ledger,
                         streams = state.streams,
                         clock = viewModel.serverClock,
-                        onEdit = { editor = LedgerEditor.Fund(fund) },
-                        onMove = { direction ->
-                            editor = LedgerEditor.Movement(fund, direction)
-                        },
-                        onEditMovement = { movement ->
-                            editor = LedgerEditor.Movement(fund, movement.direction, movement)
-                        },
-                        onDeleteMovement = { viewModel.deleteFundMovement(it) },
-                        onDelete = { viewModel.deleteFund(fund.id) },
+                        onOpen = { onOpenFund(fund.id) },
                     )
                 }
             }
 
             item {
-                SectionHeader("What you actually spent") {
-                    AddChip("Record", MaterialTheme.colorScheme.primary) {
-                        editor = LedgerEditor.Entry("EXPENSE")
+                // Two chips rather than one "Record" button. The form has always had a
+                // Spent/Received switch, but it was two taps and a glance inside a form to
+                // find, under a heading that said the section was for spending -- so money
+                // coming in got written down as a deposit into a fund instead, which moves
+                // an amount around without it ever having been earned.
+                SectionHeader("What happened once") {
+                    Row {
+                        AddChip("In", DividendColors.Growth) {
+                            editor = LedgerEditor.Entry("INCOME")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        AddChip("Out", DividendColors.Danger) {
+                            editor = LedgerEditor.Entry("EXPENSE")
+                        }
                     }
                 }
             }
@@ -212,8 +217,9 @@ fun LedgerScreen(
             if (ledger.entries.isEmpty()) {
                 item {
                     HintCard(
-                        "One-off things, as they happen: lunch, petrol, a taxi. Each one comes " +
-                            "straight off what is left above.",
+                        "Things that happen once rather than every month. Out for a lunch, " +
+                            "petrol, a taxi; In for a side job, a refund, a gift. Each one " +
+                            "moves what is left above.",
                     )
                 }
             } else {
@@ -590,17 +596,26 @@ private fun AllocationBar(ledger: LedgerDto) {
     }
 }
 
+/**
+ * One fund, as much of it as belongs in a list.
+ *
+ * Everything you would compare two funds by and nothing you would do to one: the buttons, the
+ * movements and the delete moved to the fund's own screen. Six things and two controls per
+ * card meant three funds filled a phone, and the figure you actually wanted to compare was
+ * the hardest thing on the card to find.
+ *
+ * The delete going with them matters more than the room it saves. It sat one row above the
+ * delete on a movement, drawn with the same icon at almost the same size, and the two mean
+ * very different things: one removes a line of history, the other removes the fund and every
+ * line in it.
+ */
 @Composable
 private fun FundRow(
     fund: FundDto,
     ledger: LedgerDto,
     streams: LedgerStreams,
     clock: ServerClock,
-    onEdit: () -> Unit,
-    onMove: (String) -> Unit,
-    onEditMovement: (FundMovementDto) -> Unit,
-    onDeleteMovement: (String) -> Unit,
-    onDelete: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
     val net by rememberNetAccrued(streams, clock)
@@ -615,7 +630,7 @@ private fun FundRow(
         if (target.signum() <= 0) 0f
         else accruing.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
 
-    DsCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
+    DsCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconBadge(badge)
             Spacer(Modifier.width(12.dp))
@@ -648,14 +663,13 @@ private fun FundRow(
                 OverlineText(if (borrowed) "owed back" else "in the fund")
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Remove ${fund.name}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Open ${fund.name}",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
 
         Spacer(Modifier.height(10.dp))
@@ -667,56 +681,20 @@ private fun FundRow(
         )
         Spacer(Modifier.height(8.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                when {
-                    holding.signum() < 0 && target.signum() > 0 ->
-                        "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
-                    target.signum() > 0 ->
-                        "+${accruing.formatAmount(Precision.AMOUNT)} of " +
-                            "${target.formatMoney(ledger.currency)} this month"
-                    else -> "Nothing to put aside this month"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Row {
-                AddChip("Spend", DividendColors.Danger) { onMove("WITHDRAWAL") }
-                Spacer(Modifier.width(8.dp))
-                AddChip("Add", DividendColors.Growth) { onMove("DEPOSIT") }
-            }
-        }
-
-        if (fund.movements.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            fund.movements.take(MOVEMENTS_SHOWN).forEach { movement ->
-                MovementRow(
-                    movement = movement,
-                    currency = ledger.currency,
-                    onEdit = { onEditMovement(movement) },
-                    onDelete = { onDeleteMovement(movement.id) },
-                )
-            }
-            val hidden = fund.movements.size - MOVEMENTS_SHOWN
-            if (hidden > 0) {
-                Text(
-                    "and $hidden more",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
+        Text(
+            when {
+                holding.signum() < 0 && target.signum() > 0 ->
+                    "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
+                target.signum() > 0 ->
+                    "+${accruing.formatAmount(Precision.AMOUNT)} of " +
+                        "${target.formatMoney(ledger.currency)} this month"
+                else -> "Nothing to put aside this month"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
-
-/** How many of a fund's movements are listed on its row before the rest are summarised. */
-private const val MOVEMENTS_SHOWN = 3
 
 /**
  * One movement, correctable.
@@ -726,7 +704,7 @@ private const val MOVEMENTS_SHOWN = 3
  * leave the same balance and a history that says the money went in twice and came out once.
  */
 @Composable
-private fun MovementRow(
+internal fun MovementRow(
     movement: FundMovementDto,
     currency: String,
     onEdit: () -> Unit,
@@ -1276,7 +1254,7 @@ internal fun IconBadge(icon: LedgerIcon, size: androidx.compose.ui.unit.Dp = 40.
 }
 
 @Composable
-private fun AddChip(
+internal fun AddChip(
     label: String,
     tint: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
@@ -1296,7 +1274,7 @@ private fun AddChip(
 }
 
 @Composable
-private fun HintCard(message: String) {
+internal fun HintCard(message: String) {
     DsCard(modifier = Modifier.fillMaxWidth()) {
         Text(
             message,
