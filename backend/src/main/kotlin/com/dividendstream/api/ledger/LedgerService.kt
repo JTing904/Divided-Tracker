@@ -39,18 +39,27 @@ class LedgerService(
 ) {
 
     @Transactional(readOnly = true)
-    fun ledger(userId: UUID): LedgerResponse {
+    fun ledger(userId: UUID, period: LedgerPeriod = LedgerPeriod.MONTH): LedgerResponse {
         val now = Instant.now(clock)
         val zone = properties.zoneId
+
+        // Two windows, and they do different jobs. The chosen one is what the screen is
+        // showing; the month is what a salary, a fund and a percentage are all denominated in,
+        // so the funds keep working from it whichever view is on.
         val month = CashFlowEngine.monthWindow(now, zone)
+        val window = when (period) {
+            LedgerPeriod.DAY -> CashFlowEngine.dayWindow(now, zone)
+            LedgerPeriod.MONTH -> month
+        }
 
         val flows = cashFlowRepository.findAllByUserIdOrderByCreatedAtAsc(userId)
-        val described = flows.map { it.describe(month, now, zone) }
+        val described = flows.map { it.describe(window, now, zone) }
 
-        val monthStartDate = LocalDate.ofInstant(month.start, zone)
+        val windowFrom = LocalDate.ofInstant(window.start, zone)
+        val windowTo = LocalDate.ofInstant(window.end.minusSeconds(1), zone)
         val entries = entryRepository
             .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
-                userId, monthStartDate, monthStartDate.plusMonths(1).minusDays(1),
+                userId, windowFrom, windowTo,
             )
 
         val incomeRate = described.sumRate(FlowDirection.INCOME, now)
@@ -59,13 +68,30 @@ class LedgerService(
 
         val accruedIncome = described.sumAccrued(FlowDirection.INCOME)
         val accruedExpense = described.sumAccrued(FlowDirection.EXPENSE)
-        val netAccrued = accruedIncome.subtract(accruedExpense)
         val actualIncome = entries.sumAmount(FlowDirection.INCOME)
         val actualExpense = entries.sumAmount(FlowDirection.EXPENSE)
 
-        val plannedIncome = described.sumExpected(FlowDirection.INCOME)
-        val plannedExpense = described.sumExpected(FlowDirection.EXPENSE)
+        // What is left counts the one-off records as well as the repeating ones. Recording a
+        // RM12 lunch and watching the figure not move made the two halves of the screen look
+        // unrelated; a person writing down what they spent means it to come off what they have.
+        //
+        // Nothing deduplicates: entering the rent as a record *and* as a monthly outgoing
+        // counts it twice. The two sections say which is which, and guessing that two amounts
+        // are the same payment would be a worse failure than the one it prevents.
+        val recordedNet = actualIncome.subtract(actualExpense)
+        val netAccrued = accruedIncome.subtract(accruedExpense).add(recordedNet)
+
+        val plannedIncome = described.sumExpected(FlowDirection.INCOME).add(actualIncome)
+        val plannedExpense = described.sumExpected(FlowDirection.EXPENSE).add(actualExpense)
         val plannedSurplus = plannedIncome.subtract(plannedExpense)
+
+        // The funds are answered from the month, always. Their share is a share of a month's
+        // surplus, and switching the screen to today must not make a fund appear to shrink.
+        val monthly = if (period == LedgerPeriod.MONTH) {
+            MonthFigures(netRate, plannedSurplus, netAccrued)
+        } else {
+            monthFigures(userId, flows, month, now, zone)
+        }
 
         val funds = fundRepository.findAllByUserIdOrderByPositionAscCreatedAtAsc(userId)
         val allocated = funds.fold(BigDecimal.ZERO) { sum, it -> sum + it.percent }
@@ -75,13 +101,23 @@ class LedgerService(
             .findAllByUserIdOrderByOccurredOnDescCreatedAtDesc(userId)
             .groupBy { it.fundId }
         val describedFunds = funds.map {
-            it.describe(netRate, plannedSurplus, netAccrued, movements[it.id].orEmpty(), flows, now, zone)
+            it.describe(
+                monthly.netRate, monthly.plannedSurplus, monthly.netAccrued,
+                movements[it.id].orEmpty(), flows, now, zone,
+            )
         }
 
         return LedgerResponse(
             serverTime = now,
             currency = userRepository.findById(userId).map { it.baseCurrency }.orElse(DEFAULT_CURRENCY),
-            month = YearMonth.from(monthStartDate).toString(),
+            period = period,
+            periodStart = window.start,
+            periodEnd = window.end,
+            periodLabel = when (period) {
+                LedgerPeriod.DAY -> windowFrom.toString()
+                LedgerPeriod.MONTH -> YearMonth.from(windowFrom).toString()
+            },
+            month = YearMonth.from(LocalDate.ofInstant(month.start, zone)).toString(),
             monthStart = month.start,
             monthEnd = month.end,
             daysLeftInMonth = CashFlowEngine.daysLeftInMonth(now, zone),
@@ -96,10 +132,11 @@ class LedgerService(
             accruedIncome = Money.accrual(accruedIncome),
             accruedExpense = Money.accrual(accruedExpense),
             netAccrued = Money.accrual(netAccrued),
+            recordedNet = Money.amount(recordedNet),
 
             actualIncome = Money.amount(actualIncome),
             actualExpense = Money.amount(actualExpense),
-            actualNet = Money.amount(actualIncome.subtract(actualExpense)),
+            actualNet = Money.amount(recordedNet),
 
             funds = describedFunds,
             allocatedPercent = allocated,
@@ -111,6 +148,41 @@ class LedgerService(
             flows = described,
             entries = entries.map { it.describe() },
             months = monthlyTotals(userId, now, zone),
+        )
+    }
+
+    /** The month's own figures, for the funds, when the screen is showing a day. */
+    private data class MonthFigures(
+        val netRate: BigDecimal,
+        val plannedSurplus: BigDecimal,
+        val netAccrued: BigDecimal,
+    )
+
+    private fun monthFigures(
+        userId: UUID,
+        flows: List<CashFlowEntity>,
+        month: Window,
+        now: Instant,
+        zone: java.time.ZoneId,
+    ): MonthFigures {
+        val described = flows.map { it.describe(month, now, zone) }
+        val from = LocalDate.ofInstant(month.start, zone)
+        val entries = entryRepository
+            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
+                userId, from, LocalDate.ofInstant(month.end.minusSeconds(1), zone),
+            )
+        val recorded = entries.sumAmount(FlowDirection.INCOME)
+            .subtract(entries.sumAmount(FlowDirection.EXPENSE))
+
+        return MonthFigures(
+            netRate = described.sumRate(FlowDirection.INCOME, now)
+                .subtract(described.sumRate(FlowDirection.EXPENSE, now)),
+            plannedSurplus = described.sumExpected(FlowDirection.INCOME)
+                .subtract(described.sumExpected(FlowDirection.EXPENSE))
+                .add(recorded),
+            netAccrued = described.sumAccrued(FlowDirection.INCOME)
+                .subtract(described.sumAccrued(FlowDirection.EXPENSE))
+                .add(recorded),
         )
     }
 
@@ -251,10 +323,14 @@ class LedgerService(
     /**
      * Records money going into or out of a fund.
      *
-     * A withdrawal larger than the balance is refused, and the refusal says what is actually
-     * there. Allowing it would leave a fund holding a negative amount, which is not a thing
-     * that can happen to a pot of money -- it means either a typo or that some deposits were
-     * never recorded, and both are better fixed than stored.
+     * A withdrawal may take a fund below zero, and that is deliberate. Taking more out of the
+     * holiday fund than it held is a thing people do, and what they mean by it is "I have
+     * borrowed from this and owe it back" -- which the app can represent exactly, because the
+     * share keeps filling and pays the debt down by itself over the following months.
+     *
+     * Refusing it would have forced the same person to record a fiction -- a deposit they
+     * never made -- to describe something that really happened. A ledger that will not accept
+     * the truth is worse than one holding an uncomfortable number.
      */
     @Transactional
     fun saveFundMovement(
@@ -272,29 +348,6 @@ class LedgerService(
         }
 
         val amount = Money.amount(request.amount)
-        if (request.direction == FundMovementDirection.WITHDRAWAL) {
-            val others = movementRepository
-                .findAllByFundIdOrderByOccurredOnDescCreatedAtDesc(fund.id)
-                .filter { it.id != existing?.id }
-            // What is actually available is the plan's accumulated share as well as anything
-            // paid in by hand -- otherwise somebody could not spend the money the fund had
-            // been filling with all year without first depositing it to themselves.
-            val now = Instant.now(clock)
-            val zone = properties.zoneId
-            val flows = cashFlowRepository.findAllByUserIdOrderByCreatedAtAsc(userId)
-            val share = fund.percent.divide(HUNDRED, SHARE_SCALE, RoundingMode.HALF_UP)
-            val month = CashFlowEngine.monthWindow(now, zone)
-            val available = fund.earmarkedBeforeThisMonth(share, flows, now, zone)
-                .add(fund.accruedShareThisMonth(share, flows, month, now, zone))
-                .add(others.total(FundMovementDirection.DEPOSIT))
-                .subtract(others.total(FundMovementDirection.WITHDRAWAL))
-            if (amount > available) {
-                throw InvalidRequestException(
-                    "There is only ${Money.amount(available).toPlainString()} in ${fund.name}.",
-                )
-            }
-        }
-
         val entity = existing ?: FundMovementEntity(
             id = request.id ?: UUID.randomUUID(),
             userId = userId,
@@ -450,8 +503,19 @@ class LedgerService(
         var total = BigDecimal.ZERO
         var guard = 0
 
+        // Every record the person has, grouped by the month it happened in. One query, and it
+        // is the same set of rows however many months are walked below.
+        val recordedByMonth = entryRepository
+            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
+                userId, month, thisMonth.minusDays(1),
+            )
+            .groupBy { YearMonth.from(it.occurredOn) }
+            .mapValues { (_, rows) ->
+                rows.sumAmount(FlowDirection.INCOME).subtract(rows.sumAmount(FlowDirection.EXPENSE))
+            }
+
         while (month.isBefore(thisMonth) && guard++ < MAX_HISTORY_MONTHS) {
-            val surplus = surplusOver(CashFlowEngine.monthOf(month, zone), flows, zone)
+            val surplus = surplusOver(CashFlowEngine.monthOf(month, zone), flows, recordedByMonth, zone)
             // A month that ran a deficit puts nothing aside, and takes nothing back out
             // either: the fund did not pay the rent.
             if (surplus.signum() > 0) total = total.add(surplus.multiply(share))
@@ -460,20 +524,30 @@ class LedgerService(
         return total
     }
 
-    /** Income minus outgoings across a whole month, from the flows that were live during it. */
+    /**
+     * Income minus outgoings across a whole month: the flows that were live during it, and
+     * whatever was written down in it.
+     *
+     * The records belong here for the same reason they belong in this month's figure. A fund
+     * takes a share of what was actually left over, and a month with RM800 of unplanned
+     * spending in it did not leave as much over as the plan alone suggests.
+     */
     private fun surplusOver(
         month: Window,
         flows: List<CashFlowEntity>,
+        recordedByMonth: Map<YearMonth, BigDecimal>,
         zone: java.time.ZoneId,
     ): BigDecimal {
         // An instant inside the month, so each rate is divided by that month's own length.
         val inside = month.start.plusSeconds(1)
-        return flows.fold(BigDecimal.ZERO) { sum, flow ->
+        val fromFlows = flows.fold(BigDecimal.ZERO) { sum, flow ->
             val expected = CashFlowEngine
                 .project(flow.amount, flow.period, flow.startsOn, flow.endsOn, month, inside, zone)
                 .expected
             if (flow.direction == FlowDirection.INCOME) sum.add(expected) else sum.subtract(expected)
         }
+        val key = YearMonth.from(LocalDate.ofInstant(month.start, zone))
+        return fromFlows.add(recordedByMonth[key] ?: BigDecimal.ZERO)
     }
 
     /** This fund's share of what the plan has put aside so far this month. */

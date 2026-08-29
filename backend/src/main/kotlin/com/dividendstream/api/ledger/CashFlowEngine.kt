@@ -211,6 +211,15 @@ object CashFlowEngine {
             .divide(BigDecimal.valueOf(window.seconds), 6, RoundingMode.DOWN)
     }
 
+    /** The calendar day containing [at], in [zone]. */
+    fun dayWindow(at: Instant, zone: ZoneId): Window {
+        val date = LocalDate.ofInstant(at, zone)
+        return Window(
+            start = date.atStartOfDay(zone).toInstant(),
+            end = date.plusDays(1).atStartOfDay(zone).toInstant(),
+        )
+    }
+
     /** The calendar month containing [first], in [zone]. */
     fun monthOf(first: LocalDate, zone: ZoneId): Window = Window(
         start = first.withDayOfMonth(1).atStartOfDay(zone).toInstant(),

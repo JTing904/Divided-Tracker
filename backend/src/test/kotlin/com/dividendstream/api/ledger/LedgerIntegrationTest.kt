@@ -72,21 +72,88 @@ class LedgerIntegrationTest {
     }
 
     @Test
-    @DisplayName("projections and records are reported apart, never added together")
-    fun `recorded entries stay separate from projections`() {
+    @DisplayName("writing down what you spent takes it off what is left")
+    fun `records come off the surplus`() {
         val token = register("careful@example.com")
 
         saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
+        val before = ledger(token)["netAccrued"].money()
+
         saveEntry(token, """{"direction":"EXPENSE","amount":"45.50","category":"Food","note":"Lunch"}""")
+        val after = ledger(token)
 
-        val ledger = ledger(token)
+        // The lunch is gone from what is left. It is still reported on its own as well, so the
+        // screen can say how much of the total came from records rather than from the plan.
+        assertThat(after["netAccrued"].money()).isLessThan(before)
+        assertThat(after["recordedNet"].money()).isEqualByComparingTo(BigDecimal("-45.50"))
+        assertThat(after["actualExpense"].money()).isEqualByComparingTo(BigDecimal("45.50"))
+        assertThat(after["actualIncome"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(after["entries"]).hasSize(1)
+    }
 
-        // The projection knows nothing of the lunch, and the record knows nothing of the salary.
-        assertThat(ledger["plannedIncome"].money()).isEqualByComparingTo(BigDecimal("3000.00"))
-        assertThat(ledger["actualExpense"].money()).isEqualByComparingTo(BigDecimal("45.50"))
-        assertThat(ledger["actualIncome"].money()).isEqualByComparingTo(BigDecimal.ZERO)
-        assertThat(ledger["actualNet"].money()).isEqualByComparingTo(BigDecimal("-45.50"))
-        assertThat(ledger["entries"]).hasSize(1)
+    @Test
+    @DisplayName("the day view measures the same data over today alone")
+    fun `a day is a narrower window on the same ledger`() {
+        val token = register("daily@example.com")
+
+        saveFlow(
+            token,
+            """{"name":"Salary","direction":"INCOME","amount":"3100.00","period":"MONTHLY",""" +
+                """"startsOn":"2020-01-01"}""",
+        )
+
+        val month = ledger(token)
+        val day = ledger(token, "DAY")
+
+        assertThat(month["period"].asText()).isEqualTo("MONTH")
+        assertThat(day["period"].asText()).isEqualTo("DAY")
+        // One day of a month's salary is a fraction of it, never the whole.
+        assertThat(day["plannedIncome"].money()).isLessThan(month["plannedIncome"].money())
+        assertThat(day["plannedIncome"].money()).isGreaterThan(BigDecimal.ZERO)
+        assertThat(day["periodLabel"].asText()).hasSize(10)
+        assertThat(month["periodLabel"].asText()).hasSize(7)
+    }
+
+    @Test
+    @DisplayName("overspending today shows as a negative day and stays in the month")
+    fun `a day can go negative without the month forgetting`() {
+        val token = register("overspent@example.com")
+
+        // RM31 a day of income, against RM500 spent today.
+        saveFlow(
+            token,
+            """{"name":"Allowance","direction":"INCOME","amount":"31.00","period":"DAILY",""" +
+                """"startsOn":"2020-01-01"}""",
+        )
+        saveEntry(token, """{"direction":"EXPENSE","amount":"500.00","category":"Fun"}""")
+
+        val day = ledger(token, "DAY")
+        val month = ledger(token)
+
+        assertThat(day["netAccrued"].money()).isLessThan(BigDecimal.ZERO)
+        // Midnight is not a reason for money that was spent to stop having been spent: the
+        // month carries the same RM500.
+        assertThat(month["actualExpense"].money()).isEqualByComparingTo(BigDecimal("500.00"))
+        assertThat(month["recordedNet"].money()).isEqualByComparingTo(BigDecimal("-500.00"))
+    }
+
+    @Test
+    @DisplayName("switching to the day view does not make a fund look smaller")
+    fun `funds are answered from the month whichever view is on`() {
+        val token = register("steadyfund@example.com")
+
+        saveFlow(
+            token,
+            """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY",""" +
+                """"startsOn":"2020-01-01"}""",
+        )
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+
+        val fromMonth = ledger(token)["funds"][0]["plannedThisMonth"].money()
+        val fromDay = ledger(token, "DAY")["funds"][0]["plannedThisMonth"].money()
+
+        assertThat(fromDay).isEqualByComparingTo(fromMonth)
+        assertThat(fromDay).isEqualByComparingTo(BigDecimal("1500.00"))
     }
 
     @Test
@@ -343,26 +410,61 @@ class LedgerIntegrationTest {
     }
 
     @Test
-    @DisplayName("taking out more than is there is refused, and the refusal says how much there is")
-    fun `cannot withdraw past the balance`() {
-        val token = register("overdrawn@example.com")
+    @DisplayName("a fund may be borrowed from, and goes below zero when it is")
+    fun `a fund can go negative`() {
+        val token = register("borrower@example.com")
         val fundId = objectMapper.readTree(
             saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
         )["id"].asText()
 
         move(token, fundId, """{"direction":"DEPOSIT","amount":"100.00"}""")
+        move(token, fundId, """{"direction":"WITHDRAWAL","amount":"250.00","note":"Flights"}""")
 
-        mockMvc.perform(
-            post("/api/ledger/funds/$fundId/movements")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"direction":"WITHDRAWAL","amount":"150.00"}"""),
-        )
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("100.00")))
+        val fund = ledger(token)["funds"][0]
 
-        // And the balance is untouched by the attempt.
-        assertThat(ledger(token)["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        // Owed back, not refused. Refusing would have forced a deposit that never happened
+        // in order to describe a withdrawal that did.
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("-150.00"))
+        assertThat(fund["carriedOver"].money()).isEqualByComparingTo(BigDecimal("-150.00"))
+        assertThat(fund["takenOut"].money()).isEqualByComparingTo(BigDecimal("250.00"))
+    }
+
+    @Test
+    @DisplayName("the share pays a borrowed fund back by itself")
+    fun `a negative fund refills from its percentage`() {
+        val token = register("repayer@example.com")
+
+        saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"50.00"}"""),
+        )["id"].asText()
+
+        move(token, fundId, """{"direction":"WITHDRAWAL","amount":"1000.00"}""")
+
+        val fund = ledger(token)["funds"][0]
+
+        // Still in debt for now, but this month's share is already counting against it, and
+        // next month's will too -- the balance is the debt plus whatever has accrued since.
+        assertThat(fund["carriedOver"].money()).isEqualByComparingTo(BigDecimal("-1000.00"))
+        assertThat(fund["accruedThisMonth"].money()).isGreaterThanOrEqualTo(BigDecimal.ZERO)
+        assertThat(fund["balance"].money())
+            .isEqualByComparingTo(
+                fund["carriedOver"].money().add(fund["accruedThisMonth"].money()),
+            )
+    }
+
+    @Test
+    @DisplayName("a borrowed fund drags the total down with it")
+    fun `the total across funds can be negative`() {
+        val token = register("indebted@example.com")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Travel","percent":"30.00"}"""),
+        )["id"].asText()
+
+        move(token, fundId, """{"direction":"WITHDRAWAL","amount":"400.00"}""")
+
+        assertThat(ledger(token)["totalFundBalance"].money())
+            .isEqualByComparingTo(BigDecimal("-400.00"))
     }
 
     @Test
@@ -467,9 +569,10 @@ class LedgerIntegrationTest {
                 .content(body),
         ).andExpect(status().isOk).andReturn().response.contentAsString
 
-    private fun ledger(token: String): JsonNode {
+    private fun ledger(token: String, period: String = "MONTH"): JsonNode {
         val result = mockMvc.perform(
-            get("/api/ledger").header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
+            get("/api/ledger").param("period", period)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
         ).andExpect(status().isOk).andReturn()
 
         return objectMapper.readTree(result.response.contentAsString)

@@ -462,6 +462,13 @@ data class MonthlyLedgerTotalDto(
 data class LedgerDto(
     val serverTime: Instant,
     val currency: String,
+    /** DAY or MONTH: which stretch of time the figures below cover. */
+    val period: String = "MONTH",
+    val periodStart: Instant? = null,
+    val periodEnd: Instant? = null,
+    /** `2026-08-29` for a day, `2026-08` for a month. */
+    val periodLabel: String = "",
+    /** This month, whichever period is shown. The funds are always answered from it. */
     val month: String,
     val monthStart: Instant,
     val monthEnd: Instant,
@@ -478,6 +485,11 @@ data class LedgerDto(
     val accruedExpense: BigDecimal,
     val netAccrued: BigDecimal,
 
+    /**
+     * What the records in this period add up to. Already inside [netAccrued] -- writing down a
+     * RM12 lunch takes RM12 off what is left, which is the point of writing it down.
+     */
+    val recordedNet: BigDecimal = BigDecimal.ZERO,
     val actualIncome: BigDecimal,
     val actualExpense: BigDecimal,
     val actualNet: BigDecimal,

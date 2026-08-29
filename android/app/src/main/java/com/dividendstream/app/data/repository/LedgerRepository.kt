@@ -23,15 +23,17 @@ class LedgerRepository(
     private val json: Json,
 ) {
 
-    suspend fun ledger(): AppResult<Cached<LedgerDto>> =
-        when (val result = apiCall(json) { api.ledger() }) {
+    suspend fun ledger(period: String = "MONTH"): AppResult<Cached<LedgerDto>> =
+        when (val result = apiCall(json) { api.ledger(period) }) {
             is AppResult.Success -> {
-                snapshotCache.saveLedger(result.data)
+                // Only the month is cached. A saved day would be yesterday's by morning, and
+                // showing it as merely "stale" would be showing the wrong day's money.
+                if (period == "MONTH") snapshotCache.saveLedger(result.data)
                 AppResult.Success(Cached(result.data))
             }
 
             is AppResult.Failure -> {
-                if (result.error.isAuthFailure) {
+                if (result.error.isAuthFailure || period != "MONTH") {
                     result
                 } else {
                     val cached = snapshotCache.readLedger()

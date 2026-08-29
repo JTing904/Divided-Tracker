@@ -18,6 +18,25 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
+/**
+ * Which stretch of time the screen is showing.
+ *
+ * A view, not a second set of books. The month is where the running figures live; the day
+ * narrows the same data to today. Overspending today shows as a negative day *and* stays in
+ * the month, because midnight is not a reason for money that was spent to stop having been.
+ */
+enum class LedgerPeriod(val wire: String, val label: String) {
+    Day("DAY", "Today"),
+    Month("MONTH", "This month"),
+}
+
+/** How the records are ordered. */
+enum class LedgerSort(val label: String) {
+    Newest("Newest"),
+    Oldest("Oldest"),
+    Largest("Largest"),
+}
+
 /** Money in and money out, as two sets of parameters the counter ticks from. */
 data class LedgerStreams(
     val income: List<AccumulationStream> = emptyList(),
@@ -38,7 +57,17 @@ data class LedgerUiState(
     /** A save or delete that failed, shown over the screen rather than replacing it. */
     val actionError: AppError? = null,
     val isSaving: Boolean = false,
+    val period: LedgerPeriod = LedgerPeriod.Month,
+    val sort: LedgerSort = LedgerSort.Newest,
 ) {
+    /** The records, in the chosen order. Sorted here so the screen does no work per frame. */
+    val sortedEntries: List<com.dividendstream.app.data.remote.LedgerEntryDto>
+        get() = when (sort) {
+            LedgerSort.Newest -> ledger?.entries.orEmpty()
+            LedgerSort.Oldest -> ledger?.entries.orEmpty().sortedBy { it.occurredOn }
+            LedgerSort.Largest -> ledger?.entries.orEmpty().sortedByDescending { it.amount }
+        }
+
     val hasNothing: Boolean
         get() = ledger != null && ledger.flows.isEmpty() && ledger.entries.isEmpty()
 }
@@ -54,6 +83,15 @@ class LedgerViewModel(
     init {
         refresh()
     }
+
+    /** Switching period reloads: the server measures the figures, not the screen. */
+    fun setPeriod(period: LedgerPeriod) {
+        if (_state.value.period == period) return
+        _state.update { it.copy(period = period) }
+        refresh()
+    }
+
+    fun setSort(sort: LedgerSort) = _state.update { it.copy(sort = sort) }
 
     fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
@@ -79,7 +117,7 @@ class LedgerViewModel(
                 it.copy(isLoading = it.ledger == null, isRefreshing = fromPull, error = null)
             }
 
-            when (val result = ledgerRepository.ledger()) {
+            when (val result = ledgerRepository.ledger(_state.value.period.wire)) {
                 is AppResult.Success -> _state.update {
                     it.copy(
                         isLoading = false,

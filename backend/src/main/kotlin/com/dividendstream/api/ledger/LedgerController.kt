@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -26,8 +27,10 @@ class LedgerController(private val ledgerService: LedgerService) {
      * because the accruing figures are derived from stored parameters and the clock.
      */
     @GetMapping
-    fun ledger(@AuthenticationPrincipal principal: AuthPrincipal): LedgerResponse =
-        ledgerService.ledger(principal.userId)
+    fun ledger(
+        @AuthenticationPrincipal principal: AuthPrincipal,
+        @RequestParam(name = "period", defaultValue = "MONTH") period: LedgerPeriod,
+    ): LedgerResponse = ledgerService.ledger(principal.userId, period)
 
     /** Create or update a recurring flow. Sending the same id twice records it once. */
     @PostMapping("/flows")

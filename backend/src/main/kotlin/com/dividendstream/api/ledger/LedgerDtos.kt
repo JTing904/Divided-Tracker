@@ -241,7 +241,20 @@ data class MonthlyLedgerTotal(
 data class LedgerResponse(
     val serverTime: Instant,
     val currency: String,
-    /** `2026-08`, the month every figure below is measured over. */
+
+    /** Which stretch of time the figures below cover: today, or this month. */
+    val period: LedgerPeriod,
+    val periodStart: Instant,
+    val periodEnd: Instant,
+    /** `2026-08-29` for a day, `2026-08` for a month. */
+    val periodLabel: String,
+
+    /**
+     * This month, whichever period is being shown.
+     *
+     * The funds are always answered from it: a share is a share of a month, and switching the
+     * screen to today must not make a fund look as though it shrank.
+     */
     val month: String,
     val monthStart: Instant,
     val monthEnd: Instant,
@@ -262,7 +275,13 @@ data class LedgerResponse(
     val accruedExpense: BigDecimal,
     val netAccrued: BigDecimal,
 
-    /** Recorded: what the entries for this month actually add up to. */
+    /**
+     * Recorded: what the entries in this period add up to. Already counted in [netAccrued] --
+     * writing down a RM12 lunch takes RM12 off what is left, which is what writing it down is
+     * for. Reported separately so the screen can show how much of the total came from records
+     * rather than from the plan.
+     */
+    val recordedNet: BigDecimal,
     val actualIncome: BigDecimal,
     val actualExpense: BigDecimal,
     val actualNet: BigDecimal,

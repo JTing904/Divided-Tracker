@@ -13,3 +13,13 @@ enum class FlowDirection { INCOME, EXPENSE }
  * period, and the rates simply add up.
  */
 enum class CashFlowPeriod { DAILY, WEEKLY, MONTHLY, YEARLY }
+
+/**
+ * The stretch of time the ledger screen is showing.
+ *
+ * A view, not a separate set of books. The month is where the running figures live, because
+ * that is the period a salary and a fund are denominated in; [DAY] narrows the same data down
+ * to today. Overspending today therefore shows as a negative day *and* stays in the month --
+ * midnight is not a reason for money that was spent to stop having been spent.
+ */
+enum class LedgerPeriod { DAY, MONTH }

@@ -101,7 +101,7 @@ fun LedgerScreen(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item { MonthHeader(ledger) }
+            item { PeriodHeader(state, viewModel::setPeriod) }
 
             if (state.isStale) {
                 item {
@@ -187,7 +187,7 @@ fun LedgerScreen(
             }
 
             item {
-                SectionHeader("What actually happened") {
+                SectionHeader("What you actually spent") {
                     AddChip("Record", MaterialTheme.colorScheme.primary) {
                         editor = LedgerEditor.Entry("EXPENSE")
                     }
@@ -197,9 +197,15 @@ fun LedgerScreen(
             item { ActualTotals(ledger) }
 
             if (ledger.entries.isEmpty()) {
-                item { HintCard("Nothing written down this month. Records are facts; they are kept apart from the projection above and never added to it.") }
+                item {
+                    HintCard(
+                        "One-off things, as they happen: lunch, petrol, a taxi. Each one comes " +
+                            "straight off what is left above.",
+                    )
+                }
             } else {
-                items(ledger.entries, key = { it.id }) { entry ->
+                item { SortRow(state.sort, viewModel::setSort) }
+                items(state.sortedEntries, key = { it.id }) { entry ->
                     EntryRow(
                         entry = entry,
                         currency = ledger.currency,
@@ -231,18 +237,50 @@ fun LedgerScreen(
 // --- the counter -------------------------------------------------------------
 
 @Composable
-private fun MonthHeader(ledger: LedgerDto) {
+private fun PeriodHeader(state: LedgerUiState, onSelect: (LedgerPeriod) -> Unit) {
+    val ledger = state.ledger ?: return
+
     Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            LedgerPeriod.entries.forEach { option ->
+                val selected = option == state.period
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.surface,
+                        )
+                        .clickable { onSelect(option) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        option.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Text(
-            ledger.month.toDisplayMonth(),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            when (ledger.daysLeftInMonth) {
-                1L -> "Resets tomorrow"
-                else -> "Resets in ${ledger.daysLeftInMonth} days"
+            when (state.period) {
+                LedgerPeriod.Day -> "Starts again at midnight. What you spend today still " +
+                    "counts against the month."
+                LedgerPeriod.Month -> when (ledger.daysLeftInMonth) {
+                    1L -> "Starts again tomorrow"
+                    else -> "Starts again in ${ledger.daysLeftInMonth} days"
+                }
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -253,7 +291,10 @@ private fun MonthHeader(ledger: LedgerDto) {
 @Composable
 private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
     val ledger = state.ledger ?: return
-    val net by rememberNetAccrued(state.streams, clock)
+    // The plan, ticking, plus whatever the records come to. Recording a RM12 lunch takes RM12
+    // off the figure -- which is what a person writing it down means it to do.
+    val planned by rememberNetAccrued(state.streams, clock)
+    val net = planned.add(ledger.recordedNet)
     val negative = net.signum() < 0
 
     DsCard(
@@ -275,7 +316,14 @@ private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
                 ),
         ) {
             Column {
-                OverlineText(if (negative) "Short this month" else "Left over this month")
+                OverlineText(
+                    when {
+                        negative && state.period == LedgerPeriod.Day -> "Short today"
+                        negative -> "Short this month"
+                        state.period == LedgerPeriod.Day -> "Left over today"
+                        else -> "Left over this month"
+                    },
+                )
                 Spacer(Modifier.height(10.dp))
                 SignedLiveAmountText(amount = net, currency = ledger.currency)
                 Spacer(Modifier.height(12.dp))
@@ -284,6 +332,16 @@ private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (ledger.recordedNet.signum() != 0) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Includes ${ledger.recordedNet.abs().formatMoney(ledger.currency)} " +
+                            (if (ledger.recordedNet.signum() < 0) "you wrote down as spent"
+                            else "you wrote down as received"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -304,8 +362,13 @@ private fun BigDecimal.paceSentence(ledger: LedgerDto): String {
 @Composable
 private fun InOutRow(state: LedgerUiState, clock: ServerClock) {
     val ledger = state.ledger ?: return
-    val income by rememberSideAccrued(state.streams.income, clock)
-    val expense by rememberSideAccrued(state.streams.expense, clock)
+    // Both sides include what was written down, so the two tiles still add up to the figure
+    // above them. Splitting the records out of the totals would leave a person checking the
+    // arithmetic and finding it wrong.
+    val plannedIncome by rememberSideAccrued(state.streams.income, clock)
+    val plannedExpense by rememberSideAccrued(state.streams.expense, clock)
+    val income = plannedIncome.add(ledger.actualIncome)
+    val expense = plannedExpense.add(ledger.actualExpense)
 
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StatTile(
@@ -469,15 +532,17 @@ private fun FundRow(
             }
 
             // The headline is what the fund holds, and it moves while you watch it: the share
-            // does the filling, so there is nothing to press.
+            // does the filling, so there is nothing to press. Below zero it is a debt to the
+            // fund rather than a smaller balance, and it says so in as many words.
+            val borrowed = holding.signum() < 0
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    holding.formatAmount(Precision.AMOUNT),
+                    (if (borrowed) "-" else "") + holding.abs().formatAmount(Precision.AMOUNT),
                     style = MonoFigure,
-                    color = badge.tint,
+                    color = if (borrowed) DividendColors.Danger else badge.tint,
                     maxLines = 1,
                 )
-                OverlineText("in the fund")
+                OverlineText(if (borrowed) "owed back" else "in the fund")
             }
 
             IconButton(onClick = onDelete) {
@@ -494,7 +559,7 @@ private fun FundRow(
         LinearProgressIndicator(
             progress = { progress },
             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-            color = badge.tint,
+            color = if (holding.signum() < 0) DividendColors.Danger else badge.tint,
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
@@ -505,11 +570,13 @@ private fun FundRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (target.signum() > 0) {
-                    "+${accruing.formatAmount(Precision.AMOUNT)} of " +
-                        "${target.formatMoney(ledger.currency)} this month"
-                } else {
-                    "Nothing to put aside this month"
+                when {
+                    holding.signum() < 0 && target.signum() > 0 ->
+                        "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
+                    target.signum() > 0 ->
+                        "+${accruing.formatAmount(Precision.AMOUNT)} of " +
+                            "${target.formatMoney(ledger.currency)} this month"
+                    else -> "Nothing to put aside this month"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -560,6 +627,35 @@ private fun MovementRow(movement: FundMovementDto, currency: String) {
 }
 
 // --- records -----------------------------------------------------------------
+
+@Composable
+private fun SortRow(sort: LedgerSort, onSelect: (LedgerSort) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OverlineText("Sort")
+        Spacer(Modifier.width(10.dp))
+        LedgerSort.entries.forEach { option ->
+            val selected = option == sort
+            Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        if (selected) DividendColors.GrowthGlow
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    .clickable { onSelect(option) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ActualTotals(ledger: LedgerDto) {

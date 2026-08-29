@@ -346,12 +346,15 @@ private fun MovementDialog(
 
     val parsedAmount = amount.toAmountOrNull()
     val parsedDate = occurredOn.toDateOrNull()
-    val tooMuch = !depositing && parsedAmount != null && parsedAmount > fund.balance
+    // Said, not enforced. Spending more than a fund holds means borrowing from it, which is a
+    // real thing to record; the app's job is to make sure the person knows they are doing it.
+    val goesNegative = !depositing && parsedAmount != null &&
+        parsedAmount.subtract(fund.balance).signum() > 0
 
     EditorScaffold(
         title = if (depositing) "Add to ${fund.name}" else "Spend from ${fund.name}",
         confirmLabel = if (isSaving) "Saving…" else if (depositing) "Add" else "Spend",
-        canConfirm = parsedAmount != null && parsedDate != null && !tooMuch && !isSaving,
+        canConfirm = parsedAmount != null && parsedDate != null && !isSaving,
         onConfirm = {
             viewModel.moveFundMoney(
                 fundId = fund.id,
@@ -369,8 +372,13 @@ private fun MovementDialog(
                 "This fund already fills itself with ${fund.percent.toPlainString()}% of what " +
                     "is left over. Add money here only when you put in something extra."
             } else {
-                "There is about ${fund.balance.setScale(2, java.math.RoundingMode.DOWN)
-                    .toPlainString()} in this fund."
+                if (fund.balance.signum() < 0) {
+                    "This fund is ${fund.balance.abs().setScale(2, java.math.RoundingMode.DOWN)
+                        .toPlainString()} short. Your share is paying it back."
+                } else {
+                    "There is about ${fund.balance.setScale(2, java.math.RoundingMode.DOWN)
+                        .toPlainString()} in this fund."
+                }
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -383,8 +391,12 @@ private fun MovementDialog(
             onValueChange = { amount = it },
             placeholder = "0.00",
             keyboardType = KeyboardType.Decimal,
-            isError = tooMuch,
-            supportingText = if (tooMuch) "That is more than the fund holds." else null,
+            supportingText = if (goesNegative) {
+                "More than this fund holds. It will go below zero and pay itself back from " +
+                    "your share over the coming months."
+            } else {
+                null
+            },
         )
         Spacer(Modifier.height(12.dp))
 
