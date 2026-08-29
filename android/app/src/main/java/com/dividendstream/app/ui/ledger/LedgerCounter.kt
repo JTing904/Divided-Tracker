@@ -56,6 +56,47 @@ fun rememberNetAccrued(streams: LedgerStreams, clock: ServerClock): State<BigDec
     return amount
 }
 
+/**
+ * The month's surplus as a fund sees it: the flows ticking, plus what was written down.
+ *
+ * The server hands a fund `accruedThisMonth` as its share of `netAccrued`, and `netAccrued`
+ * is the flows accrued *plus* the month's records. The client redraws that share every frame
+ * so a fund cannot lag the counter above it -- but [rememberNetAccrued] ticks the flows alone,
+ * because that is all the flows know how to do. Multiplying only that by the share left every
+ * fund short by its cut of everything the person had written down: a month with a RM153 side
+ * job in it showed the funds a month without one, and the RM153 would then appear all at once
+ * on the first of the next month, when the past-month walk picked it up.
+ *
+ * So the fixed part is added here, in one place, rather than at each of the three call sites
+ * that need it.
+ *
+ * [recordedThisMonth] is the *month's* records even when the screen is showing a day: a fund's
+ * share is a share of a month, and switching to today must not make a fund appear to shrink.
+ */
+@Composable
+fun rememberFundSurplus(
+    streams: LedgerStreams,
+    recordedThisMonth: BigDecimal,
+    clock: ServerClock,
+): State<BigDecimal> {
+    val amount = remember { mutableStateOf(BigDecimal.ZERO) }
+
+    LaunchedEffect(streams, recordedThisMonth, clock) {
+        fun surplus(): BigDecimal =
+            AccumulationCalculator.totalAccruedAt(streams.income, clock.now())
+                .subtract(AccumulationCalculator.totalAccruedAt(streams.expense, clock.now()))
+                .add(recordedThisMonth)
+
+        amount.value = surplus()
+        while (true) {
+            withFrameNanos { }
+            amount.value = surplus()
+        }
+    }
+
+    return amount
+}
+
 /** One side of the counter on its own -- money in, or money out. */
 @Composable
 fun rememberSideAccrued(

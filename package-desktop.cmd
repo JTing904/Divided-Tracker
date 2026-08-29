@@ -7,7 +7,7 @@ setlocal
 
 rem Must match packageVersion in desktop\build.gradle.kts, which names the .msi jpackage
 rem produces. Keeping it in one place here means a bump touches two files, not four.
-set "APP_VERSION=1.0.10"
+set "APP_VERSION=1.0.11"
 
 title Dividend Stream - build desktop app
 

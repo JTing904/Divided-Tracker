@@ -88,7 +88,7 @@ class LedgerService(
         // The funds are answered from the month, always. Their share is a share of a month's
         // surplus, and switching the screen to today must not make a fund appear to shrink.
         val monthly = if (period == LedgerPeriod.MONTH) {
-            MonthFigures(netRate, plannedSurplus, netAccrued)
+            MonthFigures(netRate, plannedSurplus, netAccrued, recordedNet)
         } else {
             monthFigures(userId, flows, month, now, zone)
         }
@@ -142,6 +142,7 @@ class LedgerService(
 
             keptBeforeThisMonth = Money.amount(keptBeforeThisMonth),
             monthNetAccrued = Money.accrual(monthly.netAccrued),
+            monthRecordedNet = Money.amount(monthly.recorded),
             keptSoFar = Money.accrual(keptBeforeThisMonth.add(monthly.netAccrued)),
 
             funds = describedFunds,
@@ -214,6 +215,15 @@ class LedgerService(
         val netRate: BigDecimal,
         val plannedSurplus: BigDecimal,
         val netAccrued: BigDecimal,
+        /**
+         * What was written down in the month, on its own.
+         *
+         * Already inside [netAccrued]. Reported separately because the client cannot work it
+         * back out: it ticks the flows from their own parameters, and a figure that is a
+         * moving part plus a fixed part has to arrive as two numbers or the client can only
+         * draw the moving one.
+         */
+        val recorded: BigDecimal,
     )
 
     private fun monthFigures(
@@ -241,6 +251,7 @@ class LedgerService(
             netAccrued = described.sumAccrued(FlowDirection.INCOME)
                 .subtract(described.sumAccrued(FlowDirection.EXPENSE))
                 .add(recorded),
+            recorded = recorded,
         )
     }
 
@@ -606,23 +617,6 @@ class LedgerService(
         }
         val key = YearMonth.from(LocalDate.ofInstant(month.start, zone))
         return fromFlows.add(recordedByMonth[key] ?: BigDecimal.ZERO)
-    }
-
-    /** This fund's share of what the plan has put aside so far this month. */
-    private fun FundEntity.accruedShareThisMonth(
-        share: BigDecimal,
-        flows: List<CashFlowEntity>,
-        month: Window,
-        now: Instant,
-        zone: java.time.ZoneId,
-    ): BigDecimal {
-        val accrued = flows.fold(BigDecimal.ZERO) { sum, flow ->
-            val value = CashFlowEngine
-                .project(flow.amount, flow.period, flow.startsOn, flow.endsOn, month, now, zone)
-                .accrued
-            if (flow.direction == FlowDirection.INCOME) sum.add(value) else sum.subtract(value)
-        }
-        return if (accrued.signum() <= 0) BigDecimal.ZERO else accrued.multiply(share)
     }
 
     private fun FundMovementEntity.describe() = FundMovementResponse(

@@ -357,6 +357,45 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    @DisplayName("what was written down this month reaches the funds, not just next month")
+    fun `a record this month is in the fund share`() {
+        val token = register("recordshare@example.com")
+
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+        // No flows at all, so the whole surplus is this one record and the figures below are
+        // exact rather than a range: nothing is accruing per second to move them.
+        saveEntry(token, """{"direction":"INCOME","amount":"200.00","category":"salary"}""")
+
+        val body = ledger(token)
+        val fund = body["funds"][0]
+
+        assertThat(fund["accruedThisMonth"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+
+        // The client redraws the share every frame from the flows, which tick, plus the part
+        // that does not. Without this field it can only draw the ticking half, and every fund
+        // reads short by its cut of everything written down.
+        assertThat(body["monthRecordedNet"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+    }
+
+    @Test
+    @DisplayName("a day view still answers the funds from the whole month")
+    fun `the month's records reach the funds on a day view`() {
+        val token = register("dayshare@example.com")
+
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+        saveEntry(token, """{"direction":"INCOME","amount":"200.00","category":"salary"}""")
+
+        val day = ledger(token, period = "DAY")
+
+        // Switching to today must not make a fund appear to shrink, so both the fund and the
+        // figure the client rebuilds it from stay the month's.
+        assertThat(day["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(day["monthRecordedNet"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+    }
+
+    @Test
     @DisplayName("a fund with nothing left over holds nothing, rather than a negative")
     fun `a deficit leaves a fund empty`() {
         val token = register("emptyfund@example.com")

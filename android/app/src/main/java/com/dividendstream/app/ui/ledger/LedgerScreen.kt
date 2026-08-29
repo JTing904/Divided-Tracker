@@ -503,7 +503,7 @@ private fun CashFlowRow(
 @Composable
 private fun FundTotalCard(state: LedgerUiState, clock: ServerClock) {
     val ledger = state.ledger ?: return
-    val net by rememberNetAccrued(state.streams, clock)
+    val net by rememberFundSurplus(state.streams, ledger.monthRecordedNet, clock)
     val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net
     val total = remember(ledger.funds) { ledger.funds }
         .fold(BigDecimal.ZERO) { sum, fund ->
@@ -618,7 +618,7 @@ private fun FundRow(
     onOpen: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
-    val net by rememberNetAccrued(streams, clock)
+    val net by rememberFundSurplus(streams, ledger.monthRecordedNet, clock)
     // A fund takes its share of the surplus, and there is no share of a deficit.
     val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
     val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)

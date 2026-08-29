@@ -498,6 +498,14 @@ data class LedgerDto(
     val keptBeforeThisMonth: BigDecimal = BigDecimal.ZERO,
     /** This month's leftover, whichever period is being shown. */
     val monthNetAccrued: BigDecimal = BigDecimal.ZERO,
+    /**
+     * The month's records, which the funds take a share of along with the flows.
+     *
+     * A fund's share is recomputed every frame so it cannot drift from the counter above it,
+     * and that needs the month in two parts: the flows, which tick from their own rates, and
+     * this, which does not move. [recordedNet] is the chosen period's and differs on a day.
+     */
+    val monthRecordedNet: BigDecimal = BigDecimal.ZERO,
     /** The two above, at `serverTime`. The client re-adds them per frame to keep it moving. */
     val keptSoFar: BigDecimal = BigDecimal.ZERO,
 

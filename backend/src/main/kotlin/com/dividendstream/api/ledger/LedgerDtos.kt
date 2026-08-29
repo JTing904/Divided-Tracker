@@ -301,6 +301,17 @@ data class LedgerResponse(
      */
     val monthNetAccrued: BigDecimal,
 
+    /**
+     * What was written down this month, whatever period the screen is showing.
+     *
+     * A fund's share is a share of the whole month, and the client recomputes that share every
+     * frame so the fund and the counter above it cannot drift apart. To do that it needs the
+     * month split into the part that moves -- the flows, which it ticks from their own rates
+     * and windows -- and the part that does not, which is this. [recordedNet] is the chosen
+     * period's and is a different number on a day.
+     */
+    val monthRecordedNet: BigDecimal,
+
     /** [keptBeforeThisMonth] plus [monthNetAccrued], at `serverTime`. */
     val keptSoFar: BigDecimal,
 
