@@ -112,6 +112,17 @@ fun HomeScreen(
                 }
             }
 
+            item {
+                TotalCard(
+                    snapshot = snapshot,
+                    ledger = ledger,
+                    portfolio = state.portfolio,
+                    dividendStreams = state.streams,
+                    ledgerStreams = state.ledgerStreams,
+                    clock = viewModel.serverClock,
+                )
+            }
+
             item { CombinedRateCard(snapshot, ledger) }
 
             item {
@@ -150,6 +161,103 @@ private fun Greeting(userName: String) {
         style = MaterialTheme.typography.headlineSmall,
         color = MaterialTheme.colorScheme.onBackground,
     )
+}
+
+/**
+ * What you have, moving.
+ *
+ * Three things go in, and they are not the same kind of number, which is why the card lists
+ * them under the total rather than only showing the sum:
+ *
+ * - **Shares** are worth what the market says. Real, and the only part that is.
+ * - **Kept** is what the declared income has left over after the declared outgoings and
+ *   everything written down, added up across every month. A projection built on figures the
+ *   person typed in.
+ * - **Dividends** are estimates of what is accruing towards payments that have not happened.
+ *
+ * Two of the three move every frame, which is the point: a home screen showing a rate alone
+ * gives nothing to watch, and the rate is what the card below this one is for.
+ */
+@Composable
+private fun TotalCard(
+    snapshot: LiveDividendDto,
+    ledger: LedgerDto?,
+    portfolio: com.dividendstream.app.data.remote.PortfolioDto?,
+    dividendStreams: List<com.dividendstream.app.domain.AccumulationStream>,
+    ledgerStreams: LedgerStreams,
+    clock: ServerClock,
+) {
+    val currency = portfolio?.currency ?: snapshot.currency
+    val dividends by rememberAccruedAmount(dividendStreams, clock)
+    val thisMonth by rememberNetAccrued(ledgerStreams, clock)
+
+    val shares = portfolio?.totalMarketValue ?: BigDecimal.ZERO
+    // The settled months plus this one, recomputed here each frame so the total keeps pace
+    // with the ledger screen instead of standing still until the next refresh.
+    val kept = (ledger?.keptBeforeThisMonth ?: BigDecimal.ZERO)
+        .add(thisMonth)
+        .add(ledger?.recordedNet ?: BigDecimal.ZERO)
+    val total = shares.add(kept).add(dividends)
+
+    DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp), border = null) {
+        Box(
+            modifier = Modifier.fillMaxWidth().background(
+                Brush.horizontalGradient(
+                    listOf(
+                        if (total.signum() < 0) DividendColors.Danger.copy(alpha = 0.10f)
+                        else DividendColors.GrowthGlow,
+                        Color.Transparent,
+                    ),
+                ),
+            ),
+        ) {
+            Column {
+                OverlineText("What you have")
+                Spacer(Modifier.height(10.dp))
+                SignedLiveAmountText(amount = total, currency = currency)
+                Spacer(Modifier.height(16.dp))
+
+                Component("Shares", shares.formatMoney(currency), "market value")
+                Component("Kept", kept.formatAmount(Precision.AMOUNT), "income less what you spent")
+                Component(
+                    "Dividends",
+                    dividends.formatAmount(Precision.AMOUNT),
+                    "accruing, not yet paid",
+                )
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Only the share value is a market price. The other two are worked out from " +
+                        "what you have told the app, so this is an estimate of where you stand, " +
+                        "not a bank balance.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Component(label: String, value: String, note: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(value, style = MonoFigure, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+    }
 }
 
 /**
@@ -275,6 +383,14 @@ private fun LedgerCard(
                 style = MonoFigure,
             )
             OverlineText(if (net.signum() < 0) "short this month" else "left over this month")
+        if (ledger.keptSoFar.signum() != 0) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "${ledger.keptSoFar.formatMoney(ledger.currency)} kept in total",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
             if (ledger.totalFundBalance.signum() > 0) {
                 Spacer(Modifier.height(8.dp))
                 Text(

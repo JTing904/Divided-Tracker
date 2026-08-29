@@ -40,7 +40,6 @@ import com.dividendstream.app.core.formatFull
 import com.dividendstream.app.core.formatMoney
 import com.dividendstream.app.core.formatShares
 import com.dividendstream.app.data.remote.DividendDto
-import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.LiveStreamDto
 import com.dividendstream.app.data.remote.toAccumulationStream
@@ -113,10 +112,6 @@ fun DashboardScreen(
             item { LiveDividendCard(state, viewModel.serverClock) }
 
             item { RateBreakdownGrid(snapshot) }
-
-            state.ledger?.takeIf { it.netRatePerSecond.signum() != 0 }?.let { ledger ->
-                item { CombinedPaceCard(snapshot, ledger) }
-            }
 
             snapshot.nextPayment?.let { next ->
                 item {
@@ -240,51 +235,6 @@ private fun LiveDividendCard(state: DashboardUiState, clock: ServerClock) {
                 textAlign = TextAlign.Center,
             )
         }
-    }
-}
-
-/**
- * Dividends and the ledger, added together.
- *
- * Only the *rate* is combined, never the accrued totals. A dividend accrues over its own cycle
- * and the ledger over a calendar month, so adding the two running figures would produce a
- * number measured over two different windows at once -- true of neither. Rates have no window:
- * ringgit per second plus ringgit per second is ringgit per second, and it is the more striking
- * figure anyway.
- */
-@Composable
-private fun CombinedPaceCard(snapshot: LiveDividendDto, ledger: LedgerDto) {
-    val currency = snapshot.currency
-    val perSecond = snapshot.rate.perSecond.add(ledger.netRatePerSecond)
-    val perDay = snapshot.rate.perDay.add(ledger.rate.perDay)
-    val perMonth = snapshot.rate.perMonth.add(ledger.rate.perMonth)
-    val negative = perSecond.signum() < 0
-
-    DsCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OverlineText("Everything together")
-            Text(
-                perSecond.formatMoney(currency, Precision.RATE) + " /sec",
-                style = MonoFigure,
-                color = if (negative) DividendColors.Danger else MaterialTheme.colorScheme.primary,
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile("Per day", perDay.formatMoney(currency), Modifier.weight(1f))
-            StatTile("Per month", perMonth.formatMoney(currency), Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Dividends plus what your ledger says is left over. The two are counted separately " +
-                "on their own screens.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

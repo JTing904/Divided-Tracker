@@ -166,12 +166,15 @@ fun LedgerScreen(
                 }
             }
 
+            item { FundTotalCard(state, viewModel.serverClock) }
+
             item { AllocationBar(ledger) }
 
             if (ledger.funds.isEmpty()) {
                 item { HintCard("Split what is left into funds -- an emergency pot, a trip, an investment. Give each one a percentage and it fills itself, second by second, and keeps what it collected when the month turns over. Spend from it and the amount comes off.") }
             } else {
-                items(ledger.funds, key = { it.id }) { fund ->
+                item { FundSortRow(state.fundSort, viewModel::setFundSort) }
+                items(state.sortedFunds, key = { it.id }) { fund ->
                     FundRow(
                         fund = fund,
                         ledger = ledger,
@@ -204,13 +207,32 @@ fun LedgerScreen(
                     )
                 }
             } else {
+                if (state.period == LedgerPeriod.Month) {
+                    item {
+                        SpendingCalendar(
+                            month = ledger.month,
+                            spentByDay = state.spentByDay,
+                            selected = state.selectedDay,
+                            currency = ledger.currency,
+                            onSelect = viewModel::selectDay,
+                        )
+                    }
+                }
                 item { SortRow(state.sort, viewModel::setSort) }
-                items(state.sortedEntries, key = { it.id }) { entry ->
-                    EntryRow(
-                        entry = entry,
-                        currency = ledger.currency,
-                        onDelete = { viewModel.deleteEntry(entry.id) },
-                    )
+
+                val shown = state.sortedEntries
+                if (shown.isEmpty()) {
+                    item {
+                        HintCard("Nothing written down on that day. Tap it again to see the month.")
+                    }
+                } else {
+                    items(shown, key = { it.id }) { entry ->
+                        EntryRow(
+                            entry = entry,
+                            currency = ledger.currency,
+                            onDelete = { viewModel.deleteEntry(entry.id) },
+                        )
+                    }
                 }
             }
 
@@ -453,6 +475,73 @@ private fun CashFlowRow(
 
 // --- funds -------------------------------------------------------------------
 
+/**
+ * Everything across the funds, ticking.
+ *
+ * Summed from the same per-frame figures the rows show, not from the server's snapshot, so
+ * the total and the rows below it always agree -- a total that lagged its own parts by a
+ * refresh would be the first thing anyone noticed.
+ */
+@Composable
+private fun FundTotalCard(state: LedgerUiState, clock: ServerClock) {
+    val ledger = state.ledger ?: return
+    val net by rememberNetAccrued(state.streams, clock)
+    val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net
+    val total = remember(ledger.funds) { ledger.funds }
+        .fold(BigDecimal.ZERO) { sum, fund ->
+            val share = fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP)
+            sum.add(fund.carriedOver).add(accruing.multiply(share))
+        }
+    val borrowed = total.signum() < 0
+
+    DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
+        OverlineText(if (borrowed) "Owed back across your funds" else "In your funds")
+        Spacer(Modifier.height(8.dp))
+        SignedLiveAmountText(
+            amount = total,
+            currency = ledger.currency,
+            decimals = Precision.AMOUNT,
+            steadyDecimals = 2,
+            style = MonoFigure,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Across ${ledger.funds.size} " + if (ledger.funds.size == 1) "fund" else "funds",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun FundSortRow(sort: FundSort, onSelect: (FundSort) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OverlineText("Sort")
+        Spacer(Modifier.width(10.dp))
+        FundSort.entries.forEach { option ->
+            val selected = option == sort
+            Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        if (selected) DividendColors.GrowthGlow
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    .clickable { onSelect(option) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun AllocationBar(ledger: LedgerDto) {
     val allocated = ledger.allocatedPercent.toFloat().coerceIn(0f, 100f) / 100f
@@ -627,6 +716,160 @@ private fun MovementRow(movement: FundMovementDto, currency: String) {
 }
 
 // --- records -----------------------------------------------------------------
+
+/**
+ * The month at a glance, with the days something was spent on marked.
+ *
+ * Records are never deleted, so a month's worth of them is longer than everything else on the
+ * screen put together. A grid of thirty-one cells says the same thing in six lines and turns
+ * the list into something you go to rather than something you scroll past.
+ *
+ * A day with nothing on it is not tappable: there would be nothing to show, and a cell that
+ * highlights and then reveals an empty list is a small lie about there being something there.
+ */
+@Composable
+private fun SpendingCalendar(
+    month: String,
+    spentByDay: Map<java.time.LocalDate, BigDecimal>,
+    selected: java.time.LocalDate?,
+    currency: String,
+    onSelect: (java.time.LocalDate?) -> Unit,
+) {
+    val first = remember(month) {
+        runCatching { YearMonth.parse(month).atDay(1) }.getOrElse { java.time.LocalDate.now().withDayOfMonth(1) }
+    }
+    val days = first.lengthOfMonth()
+    // Monday-first, so the grid matches how a week is written here.
+    val leading = (first.dayOfWeek.value + 6) % 7
+    val busiest = spentByDay.values.maxOfOrNull { it.abs() } ?: BigDecimal.ONE
+    val today = java.time.LocalDate.now()
+
+    DsCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OverlineText(if (selected == null) "Whole month" else selected.formatDayMonth())
+            if (selected != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onSelect(null) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        "Show the month",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Row(Modifier.fillMaxWidth()) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+
+        var day = 1
+        while (day <= days) {
+            Row(Modifier.fillMaxWidth()) {
+                repeat(7) { column ->
+                    val index = (day - 1) + column
+                    val isLeading = day == 1 && column < leading
+                    val number = if (day == 1) index - leading + 1 else day + column
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        if (isLeading || number < 1 || number > days) {
+                            Spacer(Modifier.height(38.dp))
+                        } else {
+                            val date = first.withDayOfMonth(number)
+                            DayCell(
+                                number = number,
+                                spent = spentByDay[date],
+                                busiest = busiest,
+                                isSelected = date == selected,
+                                isToday = date == today,
+                                onClick = { onSelect(date) },
+                            )
+                        }
+                    }
+                }
+            }
+            day += if (day == 1) 7 - leading else 7
+        }
+
+        selected?.let { date ->
+            spentByDay[date]?.let { amount ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (amount.signum() >= 0) {
+                        "${amount.formatMoney(currency)} spent on ${date.formatDayMonth()}"
+                    } else {
+                        "${amount.abs().formatMoney(currency)} received on ${date.formatDayMonth()}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayCell(
+    number: Int,
+    spent: BigDecimal?,
+    busiest: BigDecimal,
+    isSelected: Boolean,
+    isToday: Boolean,
+    onClick: () -> Unit,
+) {
+    val has = spent != null && spent.signum() != 0
+    // The heavier the day, the stronger the wash. Floors at a visible level so a small day is
+    // not indistinguishable from an empty one.
+    val weight = if (!has || busiest.signum() == 0) 0f else {
+        spent!!.abs().divide(busiest, 4, RoundingMode.DOWN).toFloat().coerceIn(0.18f, 1f)
+    }
+    val tint = if (spent != null && spent.signum() < 0) DividendColors.Growth else DividendColors.Danger
+
+    Box(
+        modifier = Modifier
+            .padding(2.dp)
+            .size(38.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                when {
+                    isSelected -> tint.copy(alpha = 0.45f)
+                    has -> tint.copy(alpha = 0.10f + 0.25f * weight)
+                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                },
+            )
+            .then(if (has) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            number.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = when {
+                isSelected -> MaterialTheme.colorScheme.onSurface
+                isToday -> MaterialTheme.colorScheme.primary
+                has -> MaterialTheme.colorScheme.onSurface
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
 
 @Composable
 private fun SortRow(sort: LedgerSort, onSelect: (LedgerSort) -> Unit) {

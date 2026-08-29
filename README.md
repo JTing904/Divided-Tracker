@@ -273,12 +273,27 @@ month is worked out from the flows as they stand today, so a raise entered now i
 backwards. Storing a total per month is the fix, and is worth doing once anyone has a year of
 them.
 
-Two kinds of number live on that screen and are never added together:
+Two kinds of number feed that screen, and the field names keep them apart even though the
+figure on top is the sum of both:
 
 | | |
 |---|---|
-| `planned` / `accrued` | projections, from the flows the person declared |
-| `actual` | records, from the entries they wrote down |
+| `accrued` | the projection, ticking, from the flows the person declared |
+| `recordedNet` | the facts, from the one-off entries they wrote down |
+
+They *are* added. Writing down a RM12 lunch takes RM12 off what is left, because that is what
+writing it down means; an earlier version kept them apart on principle and produced a ledger
+where recording your spending changed nothing. Nothing deduplicates — entering the rent as a
+record as well as a monthly outgoing counts it twice — because guessing that two amounts are
+the same payment would be a worse failure than the one it prevents.
+
+The screen can be measured over **today** or **this month** (`?period=DAY|MONTH`). The month is
+the ledger: a day that ends short is still short in the month, because midnight is not a reason
+for money that was spent to stop having been spent. Funds are always answered from the month,
+so switching to today cannot make one appear to shrink.
+
+A fund may go below zero. Taking more out than it held means borrowing from it, which is a
+thing people do, and the share pays the debt back over the months that follow.
 
 The month is a *calendar* month drawn at `LEDGER_ZONE` (default `Asia/Kuala_Lumpur`), so a
 salary declared as RM3,000 a month lands on exactly RM3,000 — in February as well as in July.

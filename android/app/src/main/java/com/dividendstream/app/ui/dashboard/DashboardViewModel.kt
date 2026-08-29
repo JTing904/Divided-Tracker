@@ -6,11 +6,13 @@ import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.remote.LedgerDto
+import com.dividendstream.app.data.remote.PortfolioDto
 import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
+import com.dividendstream.app.data.repository.PortfolioRepository
 import com.dividendstream.app.domain.AccumulationStream
 import com.dividendstream.app.ui.ledger.LedgerStreams
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +47,8 @@ data class DashboardUiState(
     val ledger: LedgerDto? = null,
     /** The ledger's flows as counter parameters, so the home screen can tick them too. */
     val ledgerStreams: LedgerStreams = LedgerStreams(),
+    /** For the home screen's total. Absent when it has not loaded; never an error here. */
+    val portfolio: PortfolioDto? = null,
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
@@ -52,6 +56,7 @@ data class DashboardUiState(
 class DashboardViewModel(
     private val dividendRepository: DividendRepository,
     private val ledgerRepository: LedgerRepository,
+    private val portfolioRepository: PortfolioRepository,
     private val appInfoRepository: AppInfoRepository,
     val serverClock: ServerClock,
 ) : ViewModel() {
@@ -120,8 +125,25 @@ class DashboardViewModel(
      * [fromPull] drives the pull-to-refresh spinner, which has to keep turning while data is
      * already on screen — the reason it cannot simply reuse [DashboardUiState.isLoading].
      */
+    /**
+     * Loads the portfolio for the home screen's total, and stays silent when it fails.
+     *
+     * Like the ledger above: this screen is a summary, and each part it cannot fetch simply
+     * goes missing from the total rather than replacing the whole screen with an error. The
+     * portfolio tab reports its own problems.
+     */
+    private fun loadPortfolio() {
+        viewModelScope.launch {
+            val result = portfolioRepository.portfolio()
+            if (result is AppResult.Success) {
+                _state.update { it.copy(portfolio = result.data.value) }
+            }
+        }
+    }
+
     fun refresh(fromPull: Boolean = false) {
         loadLedger()
+        loadPortfolio()
         viewModelScope.launch {
             // Paint the saved copy before asking the server, not after giving up on it. The
             // backend sleeps between uses and can take two minutes to wake, and there is no

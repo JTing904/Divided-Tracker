@@ -494,6 +494,13 @@ data class LedgerDto(
     val actualExpense: BigDecimal,
     val actualNet: BigDecimal,
 
+    /** Every finished month's leftover, added up. The settled part of "how much have I kept". */
+    val keptBeforeThisMonth: BigDecimal = BigDecimal.ZERO,
+    /** This month's leftover, whichever period is being shown. */
+    val monthNetAccrued: BigDecimal = BigDecimal.ZERO,
+    /** The two above, at `serverTime`. The client re-adds them per frame to keep it moving. */
+    val keptSoFar: BigDecimal = BigDecimal.ZERO,
+
     val funds: List<FundDto> = emptyList(),
     val allocatedPercent: BigDecimal,
     val unallocatedPercent: BigDecimal,

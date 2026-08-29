@@ -93,6 +93,8 @@ class LedgerService(
             monthFigures(userId, flows, month, now, zone)
         }
 
+        val keptBeforeThisMonth = keptBeforeThisMonth(userId, flows, now, zone)
+
         val funds = fundRepository.findAllByUserIdOrderByPositionAscCreatedAtAsc(userId)
         val allocated = funds.fold(BigDecimal.ZERO) { sum, it -> sum + it.percent }
             .setScale(PERCENT_SCALE, RoundingMode.HALF_UP)
@@ -138,6 +140,10 @@ class LedgerService(
             actualExpense = Money.amount(actualExpense),
             actualNet = Money.amount(recordedNet),
 
+            keptBeforeThisMonth = Money.amount(keptBeforeThisMonth),
+            monthNetAccrued = Money.accrual(monthly.netAccrued),
+            keptSoFar = Money.accrual(keptBeforeThisMonth.add(monthly.netAccrued)),
+
             funds = describedFunds,
             allocatedPercent = allocated,
             unallocatedPercent = HUNDRED.subtract(allocated),
@@ -149,6 +155,58 @@ class LedgerService(
             entries = entries.map { it.describe() },
             months = monthlyTotals(userId, now, zone),
         )
+    }
+
+    /**
+     * Everything left over across every month that has already finished.
+     *
+     * The lifetime figure a person means by "how much have I actually kept". Walked from the
+     * earliest month anything existed in -- the first flow's start date or the first record,
+     * whichever came first -- rather than from an arbitrary horizon, so somebody who has been
+     * using this for a week is not told about eleven months of nothing.
+     *
+     * It carries the same caveat as a fund's accumulated share, and for the same reason: a
+     * past month is recomputed from the flows as they stand today, so a raise entered now is
+     * applied backwards. Records are exact, because they are dated facts.
+     */
+    private fun keptBeforeThisMonth(
+        userId: UUID,
+        flows: List<CashFlowEntity>,
+        now: Instant,
+        zone: java.time.ZoneId,
+    ): BigDecimal {
+        val thisMonth = LocalDate.ofInstant(now, zone).withDayOfMonth(1)
+        val earliestFlow = flows.minOfOrNull { it.startsOn }
+        val earliestEntry = entryRepository
+            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
+                userId, LocalDate.EPOCH, thisMonth.minusDays(1),
+            )
+            .minByOrNull { it.occurredOn }?.occurredOn
+        var month = listOfNotNull(earliestFlow, earliestEntry).minOrNull()?.withDayOfMonth(1)
+            ?: return BigDecimal.ZERO
+        // Never walk further back than the cap, however old a start date claims to be.
+        val floor = thisMonth.minusMonths(MAX_HISTORY_MONTHS.toLong())
+        if (month.isBefore(floor)) month = floor
+
+        val recordedByMonth = entryRepository
+            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
+                userId, month, thisMonth.minusDays(1),
+            )
+            .groupBy { YearMonth.from(it.occurredOn) }
+            .mapValues { (_, rows) ->
+                rows.sumAmount(FlowDirection.INCOME).subtract(rows.sumAmount(FlowDirection.EXPENSE))
+            }
+
+        var total = BigDecimal.ZERO
+        var guard = 0
+        while (month.isBefore(thisMonth) && guard++ < MAX_HISTORY_MONTHS) {
+            // A month that ran a deficit is subtracted, unlike a fund's share, which cannot go
+            // backwards. This figure is what the person actually has left, and a bad month
+            // really did leave them with less.
+            total = total.add(surplusOver(CashFlowEngine.monthOf(month, zone), flows, recordedByMonth, zone))
+            month = month.plusMonths(1)
+        }
+        return total
     }
 
     /** The month's own figures, for the funds, when the screen is showing a day. */

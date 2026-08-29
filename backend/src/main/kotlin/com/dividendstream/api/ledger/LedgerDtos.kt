@@ -287,6 +287,24 @@ data class LedgerResponse(
     val actualNet: BigDecimal,
 
     /**
+     * Everything left over across every month that has already finished -- the settled part of
+     * "how much have I kept", which does not move until this month ends.
+     */
+    val keptBeforeThisMonth: BigDecimal,
+
+    /**
+     * What this *month* has left over, whichever period the screen is showing.
+     *
+     * Sent so a client on the day view can still add the month to [keptBeforeThisMonth] and
+     * arrive at the lifetime figure, rather than showing a total that changes when somebody
+     * switches to today.
+     */
+    val monthNetAccrued: BigDecimal,
+
+    /** [keptBeforeThisMonth] plus [monthNetAccrued], at `serverTime`. */
+    val keptSoFar: BigDecimal,
+
+    /**
      * What is left after outgoings, and how it is being divided.
      *
      * [unallocatedPercent] is the share not yet claimed by any fund -- shown rather than

@@ -37,6 +37,14 @@ enum class LedgerSort(val label: String) {
     Largest("Largest"),
 }
 
+/** How the funds are ordered. */
+enum class FundSort(val label: String) {
+    Biggest("Biggest"),
+    Share("Share"),
+    Name("Name"),
+    Added("Added"),
+}
+
 /** Money in and money out, as two sets of parameters the counter ticks from. */
 data class LedgerStreams(
     val income: List<AccumulationStream> = emptyList(),
@@ -59,14 +67,48 @@ data class LedgerUiState(
     val isSaving: Boolean = false,
     val period: LedgerPeriod = LedgerPeriod.Month,
     val sort: LedgerSort = LedgerSort.Newest,
+    val fundSort: FundSort = FundSort.Biggest,
+    /**
+     * The day whose records are listed, or null for the whole period.
+     *
+     * Nothing is deleted when a month rolls over -- a record is kept for good -- so the list
+     * grows without limit and becomes the longest thing on the screen. Narrowing it to one day
+     * and putting a calendar above it keeps the records reachable without them taking over.
+     */
+    val selectedDay: LocalDate? = null,
 ) {
-    /** The records, in the chosen order. Sorted here so the screen does no work per frame. */
-    val sortedEntries: List<com.dividendstream.app.data.remote.LedgerEntryDto>
-        get() = when (sort) {
-            LedgerSort.Newest -> ledger?.entries.orEmpty()
-            LedgerSort.Oldest -> ledger?.entries.orEmpty().sortedBy { it.occurredOn }
-            LedgerSort.Largest -> ledger?.entries.orEmpty().sortedByDescending { it.amount }
+    /** The funds, in the chosen order. Sorted here so the screen does no work per frame. */
+    val sortedFunds: List<com.dividendstream.app.data.remote.FundDto>
+        get() = ledger?.funds.orEmpty().let { funds ->
+            when (fundSort) {
+                FundSort.Biggest -> funds.sortedByDescending { it.balance }
+                FundSort.Share -> funds.sortedByDescending { it.percent }
+                FundSort.Name -> funds.sortedBy { it.name.lowercase() }
+                FundSort.Added -> funds.sortedBy { it.position }
+            }
         }
+
+    /** The records for the chosen day, in the chosen order. Sorted here, not per frame. */
+    val sortedEntries: List<com.dividendstream.app.data.remote.LedgerEntryDto>
+        get() {
+            val forDay = ledger?.entries.orEmpty()
+                .filter { selectedDay == null || it.occurredOn == selectedDay }
+            return when (sort) {
+                LedgerSort.Newest -> forDay
+                LedgerSort.Oldest -> forDay.sortedBy { it.occurredOn }
+                LedgerSort.Largest -> forDay.sortedByDescending { it.amount }
+            }
+        }
+
+    /** What each day of the period cost, for the calendar. Positive means money went out. */
+    val spentByDay: Map<LocalDate, java.math.BigDecimal>
+        get() = ledger?.entries.orEmpty()
+            .groupBy { it.occurredOn }
+            .mapValues { (_, rows) ->
+                rows.fold(java.math.BigDecimal.ZERO) { sum, e ->
+                    if (e.direction == "EXPENSE") sum.add(e.amount) else sum.subtract(e.amount)
+                }
+            }
 
     val hasNothing: Boolean
         get() = ledger != null && ledger.flows.isEmpty() && ledger.entries.isEmpty()
@@ -92,6 +134,13 @@ class LedgerViewModel(
     }
 
     fun setSort(sort: LedgerSort) = _state.update { it.copy(sort = sort) }
+
+    fun setFundSort(sort: FundSort) = _state.update { it.copy(fundSort = sort) }
+
+    /** Tapping the selected day again clears it, which is how a filter should behave. */
+    fun selectDay(day: LocalDate?) = _state.update {
+        it.copy(selectedDay = if (it.selectedDay == day) null else day)
+    }
 
     fun refresh(fromPull: Boolean = false) {
         viewModelScope.launch {
