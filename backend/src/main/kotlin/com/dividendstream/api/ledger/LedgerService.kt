@@ -39,18 +39,33 @@ class LedgerService(
 ) {
 
     @Transactional(readOnly = true)
-    fun ledger(userId: UUID, period: LedgerPeriod = LedgerPeriod.MONTH): LedgerResponse {
+    fun ledger(
+        userId: UUID,
+        period: LedgerPeriod = LedgerPeriod.MONTH,
+        browsing: YearMonth? = null,
+    ): LedgerResponse {
         val now = Instant.now(clock)
         val zone = properties.zoneId
 
-        // Two windows, and they do different jobs. The chosen one is what the screen is
-        // showing; the month is what a salary, a fund and a percentage are all denominated in,
-        // so the funds keep working from it whichever view is on.
-        val month = CashFlowEngine.monthWindow(now, zone)
-        val window = when (period) {
-            LedgerPeriod.DAY -> CashFlowEngine.dayWindow(now, zone)
-            LedgerPeriod.MONTH -> month
+        // Three months' worth of thinking, in two windows.
+        //
+        // [thisMonth] is where the funds live. A percentage is a share of a month's surplus
+        // and a fund is a running position, not a thing with historical versions, so the funds
+        // are answered from the month it is *now* however far back the screen is looking.
+        //
+        // [window] is what the screen is showing: today, this month, or a month being browsed.
+        // Looking back at July means July's records, July's calendar and July's totals; it does
+        // not mean July's funds, which is a figure nobody could act on.
+        val thisMonth = CashFlowEngine.monthWindow(now, zone)
+        val browsed = browsing?.takeIf { it != YearMonth.from(LocalDate.ofInstant(now, zone)) }
+        val window = when {
+            browsed != null -> CashFlowEngine.monthOf(browsed.atDay(1), zone)
+            period == LedgerPeriod.DAY -> CashFlowEngine.dayWindow(now, zone)
+            else -> thisMonth
         }
+        // A past month has no "today" in it, so the day view cannot apply to one.
+        val effectivePeriod = if (browsed != null) LedgerPeriod.MONTH else period
+        val month = thisMonth
 
         val flows = cashFlowRepository.findAllByUserIdOrderByCreatedAtAsc(userId)
         val described = flows.map { it.describe(window, now, zone) }
@@ -98,7 +113,9 @@ class LedgerService(
 
         // The funds are answered from the month, always. Their share is a share of a month's
         // surplus, and switching the screen to today must not make a fund appear to shrink.
-        val monthly = if (period == LedgerPeriod.MONTH) {
+        // Reusable only when the window *is* this month; a day view or a browsed month has to
+        // ask the month its own question.
+        val monthly = if (effectivePeriod == LedgerPeriod.MONTH && browsed == null) {
             MonthFigures(netRate, plannedSurplus, netAccrued)
         } else {
             monthFigures(userId, flows, month, now, zone)
@@ -123,14 +140,17 @@ class LedgerService(
         return LedgerResponse(
             serverTime = now,
             currency = userRepository.findById(userId).map { it.baseCurrency }.orElse(DEFAULT_CURRENCY),
-            period = period,
+            period = effectivePeriod,
             periodStart = window.start,
             periodEnd = window.end,
-            periodLabel = when (period) {
+            periodLabel = when (effectivePeriod) {
                 LedgerPeriod.DAY -> windowFrom.toString()
                 LedgerPeriod.MONTH -> YearMonth.from(windowFrom).toString()
             },
-            month = YearMonth.from(LocalDate.ofInstant(month.start, zone)).toString(),
+            // The month the screen is showing, which the calendar is drawn from. The funds
+            // report their own, which is always the current one.
+            month = YearMonth.from(windowFrom).toString(),
+            isBrowsingPast = browsed != null,
             monthStart = month.start,
             monthEnd = month.end,
             daysLeftInMonth = CashFlowEngine.daysLeftInMonth(now, zone),

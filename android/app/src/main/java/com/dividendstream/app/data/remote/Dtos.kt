@@ -470,6 +470,8 @@ data class LedgerDto(
     val periodLabel: String = "",
     /** This month, whichever period is shown. The funds are always answered from it. */
     val month: String,
+    /** True when [month] is not the month it is now. The funds still report the current one. */
+    val isBrowsingPast: Boolean = false,
     val monthStart: Instant,
     val monthEnd: Instant,
     val daysLeftInMonth: Long = 0,

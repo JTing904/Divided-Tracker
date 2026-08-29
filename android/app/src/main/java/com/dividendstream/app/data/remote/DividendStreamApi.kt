@@ -81,7 +81,11 @@ interface DividendStreamApi {
      * the accruing figures are derived from stored parameters, so no write is performed.
      */
     @GET("api/ledger")
-    suspend fun ledger(@Query("period") period: String): LedgerDto
+    suspend fun ledger(
+        @Query("period") period: String,
+        /** `2026-07` to look back at a finished month; omitted for the month it is now. */
+        @Query("month") month: String? = null,
+    ): LedgerDto
 
     @POST("api/ledger/flows")
     suspend fun saveCashFlow(@Body request: SaveCashFlowRequest): CashFlowDto

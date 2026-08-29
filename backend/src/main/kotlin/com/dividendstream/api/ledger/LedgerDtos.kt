@@ -256,6 +256,15 @@ data class LedgerResponse(
      * screen to today must not make a fund look as though it shrank.
      */
     val month: String,
+    /**
+     * True when [month] is not the month it is now.
+     *
+     * The screen uses it to label the funds, which stay where they are: they are answered from
+     * the current month whatever is being browsed, because a fund is a running position rather
+     * than a thing with historical versions. Unlabelled, a live balance sitting under July's
+     * records would read as July's balance.
+     */
+    val isBrowsingPast: Boolean = false,
     val monthStart: Instant,
     val monthEnd: Instant,
     val daysLeftInMonth: Long,

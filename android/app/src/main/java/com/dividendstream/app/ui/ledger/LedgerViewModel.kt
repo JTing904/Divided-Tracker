@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.util.UUID
 
 /**
@@ -84,6 +85,14 @@ data class LedgerUiState(
      * and putting a calendar above it keeps the records reachable without them taking over.
      */
     val selectedDay: LocalDate? = null,
+    /**
+     * The finished month being looked at, or null for the month it is now.
+     *
+     * Not stored on the device, unlike [period]. Coming back to the app tomorrow to find it
+     * still showing last July would be a worse surprise than losing the place you had
+     * scrolled to.
+     */
+    val browsing: YearMonth? = null,
 ) {
     /** The funds, in the chosen order. Sorted here so the screen does no work per frame. */
     val sortedFunds: List<com.dividendstream.app.data.remote.FundDto>
@@ -138,6 +147,9 @@ data class LedgerUiState(
         get() = ledger != null && ledger.flows.isEmpty() && ledger.entries.isEmpty()
 }
 
+/** Matches `ledger.history-months` on the server; an arrow past it would land on nothing. */
+private const val HISTORY_MONTHS = 11L
+
 class LedgerViewModel(
     private val ledgerRepository: LedgerRepository,
     private val settingsStore: SettingsStore,
@@ -171,6 +183,29 @@ class LedgerViewModel(
 
     fun setFundSort(sort: FundSort) = _state.update { it.copy(fundSort = sort) }
 
+    /**
+     * Steps to another month, or back to this one.
+     *
+     * Bounded by the history the server will answer for at one end and by now at the other:
+     * there is nothing to look at in a month that has not happened, and an arrow that leads
+     * to an empty screen is worse than one that stops.
+     */
+    fun stepMonth(by: Long) {
+        val current = YearMonth.now()
+        val from = _state.value.browsing ?: current
+        val target = from.plusMonths(by)
+        if (target.isAfter(current)) return
+        if (target.isBefore(current.minusMonths(HISTORY_MONTHS))) return
+        browseMonth(target.takeIf { it != current })
+    }
+
+    fun browseMonth(month: YearMonth?) {
+        if (_state.value.browsing == month) return
+        // The day filter belongs to the month it was chosen in.
+        _state.update { it.copy(browsing = month, selectedDay = null) }
+        refresh()
+    }
+
     /** Tapping the selected day again clears it, which is how a filter should behave. */
     fun selectDay(day: LocalDate?) = _state.update {
         it.copy(selectedDay = if (it.selectedDay == day) null else day)
@@ -200,7 +235,13 @@ class LedgerViewModel(
                 it.copy(isLoading = it.ledger == null, isRefreshing = fromPull, error = null)
             }
 
-            when (val result = ledgerRepository.ledger(_state.value.period.wire)) {
+            val browsing = _state.value.browsing
+            when (
+                val result = ledgerRepository.ledger(
+                    _state.value.period.wire,
+                    browsing?.toString(),
+                )
+            ) {
                 is AppResult.Success -> _state.update {
                     it.copy(
                         isLoading = false,

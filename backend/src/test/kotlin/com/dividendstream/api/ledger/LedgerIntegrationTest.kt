@@ -382,6 +382,38 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    @DisplayName("a finished month can be looked back at, and the funds stay in this one")
+    fun `browsing a past month`() {
+        val token = register("browser@example.com")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+        saveEntry(token, """{"direction":"INCOME","amount":"200.00","category":"salary"}""")
+
+        val lastMonth = YearMonth.now().minusMonths(1)
+        val past = ledger(token, month = lastMonth.toString())
+
+        assertThat(past["month"].asText()).isEqualTo(lastMonth.toString())
+        assertThat(past["isBrowsingPast"].asBoolean()).isTrue()
+        // This month's record is not in last month.
+        assertThat(past["entries"]).isEmpty()
+        assertThat(past["actualIncome"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+
+        // The funds are a running position, so they answer from the month it is now however
+        // far back the rest of the screen is looking.
+        assertThat(past["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(past["monthNetAccrued"].money()).isEqualByComparingTo(BigDecimal("200.00"))
+    }
+
+    @Test
+    @DisplayName("a month that will not parse answers with this one rather than failing")
+    fun `an unparseable month falls back`() {
+        val token = register("badmonth@example.com")
+        val body = ledger(token, month = "not-a-month")
+
+        assertThat(body["month"].asText()).isEqualTo(YearMonth.now().toString())
+        assertThat(body["isBrowsingPast"].asBoolean()).isFalse()
+    }
+
+    @Test
     @DisplayName("a payment written down for later in the month has not happened yet")
     fun `a future record is projected but not accrued`() {
         val today = LocalDate.now()
@@ -684,10 +716,11 @@ class LedgerIntegrationTest {
                 .content(body),
         ).andExpect(status().isOk).andReturn().response.contentAsString
 
-    private fun ledger(token: String, period: String = "MONTH"): JsonNode {
+    private fun ledger(token: String, period: String = "MONTH", month: String? = null): JsonNode {
+        val request = get("/api/ledger").param("period", period)
+        if (month != null) request.param("month", month)
         val result = mockMvc.perform(
-            get("/api/ledger").param("period", period)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
+            request.header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
         ).andExpect(status().isOk).andReturn()
 
         return objectMapper.readTree(result.response.contentAsString)

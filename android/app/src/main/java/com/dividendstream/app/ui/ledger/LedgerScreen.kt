@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -105,7 +106,14 @@ fun LedgerScreen(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item { PeriodHeader(state, viewModel::setPeriod) }
+            item {
+                PeriodHeader(
+                    state = state,
+                    onSelect = viewModel::setPeriod,
+                    onStepMonth = viewModel::stepMonth,
+                    onBackToNow = { viewModel.browseMonth(null) },
+                )
+            }
 
             if (state.isStale) {
                 item {
@@ -157,6 +165,7 @@ fun LedgerScreen(
                     CashFlowRow(
                         flow = flow,
                         currency = ledger.currency,
+                        period = state.period,
                         clock = viewModel.serverClock,
                         onEdit = { editor = LedgerEditor.Flow(flow.direction, flow) },
                         onDelete = { viewModel.deleteFlow(flow.id) },
@@ -171,6 +180,18 @@ fun LedgerScreen(
             }
 
             item { FundTotalCard(state, viewModel.serverClock) }
+
+            if (ledger.isBrowsingPast) {
+                // The funds are a running position, not a thing with historical versions, so
+                // they are answered from the month it is now however far back the rest of the
+                // screen is looking. Unlabelled, they would read as that month's balances.
+                item {
+                    HintCard(
+                        "The funds are always what they are right now, not what they held " +
+                            "in ${ledger.month.asMonthLabel()}.",
+                    )
+                }
+            }
 
             item { AllocationBar(ledger) }
 
@@ -288,18 +309,35 @@ fun LedgerScreen(
 // --- the counter -------------------------------------------------------------
 
 @Composable
-private fun PeriodHeader(state: LedgerUiState, onSelect: (LedgerPeriod) -> Unit) {
+private fun PeriodHeader(
+    state: LedgerUiState,
+    onSelect: (LedgerPeriod) -> Unit,
+    onStepMonth: (Long) -> Unit,
+    onBackToNow: () -> Unit,
+) {
     val ledger = state.ledger ?: return
+    val browsing = ledger.isBrowsingPast
 
     Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        MonthStepper(
+            label = ledger.month.asMonthLabel(),
+            browsing = browsing,
+            onStep = onStepMonth,
+            onBackToNow = onBackToNow,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Today is a view of the month it is now; a finished month has no today in it, so the
+        // switch goes away rather than sitting there doing nothing.
+        if (!browsing) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
             LedgerPeriod.entries.forEach { option ->
                 val selected = option == state.period
                 Box(
@@ -322,22 +360,104 @@ private fun PeriodHeader(state: LedgerUiState, onSelect: (LedgerPeriod) -> Unit)
                     )
                 }
             }
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(8.dp))
+
         Text(
-            when (state.period) {
-                LedgerPeriod.Day -> "Starts again at midnight. What you spend today still " +
-                    "counts against the month."
-                LedgerPeriod.Month -> when (ledger.daysLeftInMonth) {
-                    1L -> "Starts again tomorrow"
-                    else -> "Starts again in ${ledger.daysLeftInMonth} days"
-                }
+            when {
+                browsing -> "A month that has finished. Nothing here is still counting."
+                state.period == LedgerPeriod.Day ->
+                    "Starts again at midnight. What you spend today still counts against " +
+                        "the month."
+                ledger.daysLeftInMonth == 1L -> "Starts again tomorrow"
+                else -> "Starts again in ${ledger.daysLeftInMonth} days"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
+
+/**
+ * Which month is on screen, with an arrow either side.
+ *
+ * Records are kept for good, so after a year the only way to reach March is to walk to it. The
+ * right arrow stops at the month it is now -- a month that has not happened has nothing in it,
+ * and an arrow leading to an empty screen is worse than one that stops.
+ */
+@Composable
+private fun MonthStepper(
+    label: String,
+    browsing: Boolean,
+    onStep: (Long) -> Unit,
+    onBackToNow: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StepArrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous month") { onStep(-1L) }
+        Spacer(Modifier.width(4.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (browsing) {
+                Text(
+                    "Looking back",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DividendColors.Warning,
+                )
+            }
+        }
+
+        if (browsing) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(onClick = onBackToNow)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    "Now",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+        }
+
+        StepArrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month") { onStep(1L) }
+    }
+}
+
+@Composable
+private fun StepArrow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+/** `2026-07` as `July 2026`. Falls back to the raw value rather than showing nothing. */
+private fun String.asMonthLabel(): String =
+    runCatching {
+        YearMonth.parse(this)
+            .format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
+    }.getOrDefault(this)
 
 @Composable
 private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
@@ -443,6 +563,7 @@ private fun InOutRow(state: LedgerUiState, clock: ServerClock) {
 private fun CashFlowRow(
     flow: CashFlowDto,
     currency: String,
+    period: LedgerPeriod,
     clock: ServerClock,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -478,7 +599,10 @@ private fun CashFlowRow(
                     color = if (income) DividendColors.Growth else DividendColors.Danger,
                     maxLines = 1,
                 )
-                OverlineText("this month")
+                // The figure is measured over whatever window the screen asked for, so on the
+                // day view it is a few hours of a salary. Saying "this month" over it was a
+                // plain misstatement of what the number is.
+                OverlineText(if (period == LedgerPeriod.Day) "today" else "this month")
             }
 
             IconButton(onClick = onDelete) {

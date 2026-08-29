@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.YearMonth
 import java.util.UUID
 
 /**
@@ -30,7 +31,17 @@ class LedgerController(private val ledgerService: LedgerService) {
     fun ledger(
         @AuthenticationPrincipal principal: AuthPrincipal,
         @RequestParam(name = "period", defaultValue = "MONTH") period: LedgerPeriod,
-    ): LedgerResponse = ledgerService.ledger(principal.userId, period)
+        /** `2026-07`, to look back at a finished month. Absent means the month it is now. */
+        @RequestParam(name = "month", required = false) month: String?,
+    ): LedgerResponse = ledgerService.ledger(
+        principal.userId,
+        period,
+        month?.takeIf { it.isNotBlank() }?.let {
+            // A month that will not parse is a broken link or a stale client, and answering
+            // with this month is more use than a 400 on a screen that has no way to say so.
+            runCatching { YearMonth.parse(it) }.getOrNull()
+        },
+    )
 
     /** Create or update a recurring flow. Sending the same id twice records it once. */
     @PostMapping("/flows")
