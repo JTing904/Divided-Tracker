@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -199,6 +201,10 @@ fun LedgerScreen(
 
             item { ActualTotals(ledger) }
 
+            if (state.spentByCategory.isNotEmpty()) {
+                item { CategoryChart(state.spentByCategory, ledger.currency) }
+            }
+
             if (ledger.entries.isEmpty()) {
                 item {
                     HintCard(
@@ -239,6 +245,7 @@ fun LedgerScreen(
             val past = ledger.months.filter { it.entryCount > 0 }
             if (past.isNotEmpty()) {
                 item { SectionHeader("Earlier months") }
+                item { MonthChart(ledger.months, ledger.currency) }
                 items(past, key = { it.month }) { month -> MonthRow(month, ledger.currency) }
             }
 
@@ -867,6 +874,189 @@ private fun DayCell(
                 has -> MaterialTheme.colorScheme.onSurface
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
+        )
+    }
+}
+
+/**
+ * Where the money went, as bars.
+ *
+ * Drawn with boxes rather than a charting library: a horizontal bar is a rectangle whose width
+ * is a fraction, the desktop build compiles these same sources, and a dependency that has to
+ * work on both platforms is a lot to take on for a rectangle.
+ *
+ * Each bar carries its own category colour, so the chart and the rows below it are recognisably
+ * about the same things.
+ */
+@Composable
+private fun CategoryChart(
+    spent: List<Pair<LedgerIcon, BigDecimal>>,
+    currency: String,
+) {
+    val total = spent.fold(BigDecimal.ZERO) { sum, it -> sum.add(it.second) }
+    if (total.signum() <= 0) return
+    val biggest = spent.first().second
+
+    DsCard(modifier = Modifier.fillMaxWidth()) {
+        OverlineText("Where it went")
+        Spacer(Modifier.height(12.dp))
+
+        spent.forEach { (icon, amount) ->
+            val share = amount.divide(total, 4, RoundingMode.DOWN)
+            // Bars are scaled against the biggest, not against the total: with eight
+            // categories every bar would otherwise be a stub.
+            val width = amount.divide(biggest, 4, RoundingMode.DOWN).toFloat().coerceIn(0.04f, 1f)
+
+            Column(Modifier.padding(vertical = 5.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        icon.emoji,
+                        fontSize = with(LocalDensity.current) { 15.dp.toSp() },
+                        lineHeight = with(LocalDensity.current) { 15.dp.toSp() },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        icon.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        amount.formatMoney(currency),
+                        style = MonoFigure,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        share.multiply(BigDecimal("100")).formatPercent(0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(5.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(7.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(width)
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(icon.tint),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "${total.formatMoney(currency)} written down, across ${spent.size} " +
+                if (spent.size == 1) "category" else "categories",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Twelve months of what was written down, in and out.
+ *
+ * Records only, which is why the caption says so: the recurring flows are a projection and
+ * projecting them backwards through a year would draw a history that never happened.
+ *
+ * Months with nothing in them are drawn as empty columns rather than skipped -- a gap in a
+ * chart reads as missing data, and a quiet month is not missing.
+ */
+@Composable
+private fun MonthChart(months: List<MonthlyLedgerTotalDto>, currency: String) {
+    if (months.isEmpty()) return
+    // Oldest on the left, which is the direction time is drawn in.
+    val ordered = remember(months) { months.reversed() }
+    val tallest = ordered.flatMap { listOf(it.income, it.expense) }
+        .maxOfOrNull { it } ?: BigDecimal.ZERO
+    if (tallest.signum() <= 0) return
+
+    DsCard(modifier = Modifier.fillMaxWidth()) {
+        OverlineText("Month by month")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Highest month: ${tallest.formatMoney(currency)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().height(110.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            ordered.forEach { month ->
+                fun fraction(value: BigDecimal): Float =
+                    if (value.signum() <= 0) 0f
+                    else value.divide(tallest, 4, RoundingMode.DOWN).toFloat().coerceIn(0.02f, 1f)
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(
+                        modifier = Modifier.height(88.dp),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Bar(fraction(month.income), DividendColors.Growth)
+                        Bar(fraction(month.expense), DividendColors.Danger)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        month.month.takeLast(2),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Legend("In", DividendColors.Growth)
+            Spacer(Modifier.width(14.dp))
+            Legend("Out", DividendColors.Danger)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "What you wrote down only",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.Bar(fraction: Float, tint: Color) {
+    Box(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight(fraction)
+            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+            .background(if (fraction <= 0f) Color.Transparent else tint),
+    )
+}
+
+@Composable
+private fun Legend(label: String, tint: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(tint))
+        Spacer(Modifier.width(5.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

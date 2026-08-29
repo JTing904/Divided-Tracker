@@ -100,6 +100,22 @@ data class LedgerUiState(
             }
         }
 
+    /**
+     * What was spent on each category this period, biggest first.
+     *
+     * Records only. The recurring flows have their own rows, each with its own figure, and
+     * folding a salary into a bar chart of lunches would flatten the one distinction this
+     * screen is built to keep: what repeats, and what you happened to spend.
+     */
+    val spentByCategory: List<Pair<LedgerIcon, java.math.BigDecimal>>
+        get() = ledger?.entries.orEmpty()
+            .filter { it.direction == "EXPENSE" }
+            .groupBy { LedgerIcon.of(it.category) }
+            .map { (icon, rows) ->
+                icon to rows.fold(java.math.BigDecimal.ZERO) { sum, e -> sum.add(e.amount) }
+            }
+            .sortedByDescending { it.second }
+
     /** What each day of the period cost, for the calendar. Positive means money went out. */
     val spentByDay: Map<LocalDate, java.math.BigDecimal>
         get() = ledger?.entries.orEmpty()

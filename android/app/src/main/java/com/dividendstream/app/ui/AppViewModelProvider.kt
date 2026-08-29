@@ -40,7 +40,6 @@ object AppViewModelProvider {
             DashboardViewModel(
                 container.dividendRepository,
                 container.ledgerRepository,
-                container.portfolioRepository,
                 container.appInfoRepository,
                 container.serverClock,
             )

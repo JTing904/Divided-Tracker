@@ -116,7 +116,6 @@ fun HomeScreen(
                 TotalCard(
                     snapshot = snapshot,
                     ledger = ledger,
-                    portfolio = state.portfolio,
                     dividendStreams = state.streams,
                     ledgerStreams = state.ledgerStreams,
                     clock = viewModel.serverClock,
@@ -166,38 +165,35 @@ private fun Greeting(userName: String) {
 /**
  * What you have, moving.
  *
- * Three things go in, and they are not the same kind of number, which is why the card lists
- * them under the total rather than only showing the sum:
+ * Two things go in, and neither is a share price. The market value of a portfolio belongs to
+ * the portfolio, and adding it here would put a real quoted number beside two worked-out ones
+ * and call the sum a single figure.
  *
- * - **Shares** are worth what the market says. Real, and the only part that is.
  * - **Kept** is what the declared income has left over after the declared outgoings and
- *   everything written down, added up across every month. A projection built on figures the
- *   person typed in.
- * - **Dividends** are estimates of what is accruing towards payments that have not happened.
+ *   everything written down, added up across every month.
+ * - **Dividends** is what is accruing towards payments that have not happened yet.
  *
- * Two of the three move every frame, which is the point: a home screen showing a rate alone
- * gives nothing to watch, and the rate is what the card below this one is for.
+ * Both move every frame, which is the point: a home screen leading with a rate gives nothing
+ * to watch, and the rate is what the card below this one is for.
  */
 @Composable
 private fun TotalCard(
     snapshot: LiveDividendDto,
     ledger: LedgerDto?,
-    portfolio: com.dividendstream.app.data.remote.PortfolioDto?,
     dividendStreams: List<com.dividendstream.app.domain.AccumulationStream>,
     ledgerStreams: LedgerStreams,
     clock: ServerClock,
 ) {
-    val currency = portfolio?.currency ?: snapshot.currency
+    val currency = ledger?.currency ?: snapshot.currency
     val dividends by rememberAccruedAmount(dividendStreams, clock)
     val thisMonth by rememberNetAccrued(ledgerStreams, clock)
 
-    val shares = portfolio?.totalMarketValue ?: BigDecimal.ZERO
     // The settled months plus this one, recomputed here each frame so the total keeps pace
     // with the ledger screen instead of standing still until the next refresh.
     val kept = (ledger?.keptBeforeThisMonth ?: BigDecimal.ZERO)
         .add(thisMonth)
         .add(ledger?.recordedNet ?: BigDecimal.ZERO)
-    val total = shares.add(kept).add(dividends)
+    val total = kept.add(dividends)
 
     DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp), border = null) {
         Box(
@@ -217,7 +213,6 @@ private fun TotalCard(
                 SignedLiveAmountText(amount = total, currency = currency)
                 Spacer(Modifier.height(16.dp))
 
-                Component("Shares", shares.formatMoney(currency), "market value")
                 Component("Kept", kept.formatAmount(Precision.AMOUNT), "income less what you spent")
                 Component(
                     "Dividends",
@@ -227,9 +222,8 @@ private fun TotalCard(
 
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Only the share value is a market price. The other two are worked out from " +
-                        "what you have told the app, so this is an estimate of where you stand, " +
-                        "not a bank balance.",
+                    "Worked out from what you have told the app and what your holdings are " +
+                        "expected to pay. An estimate of where you stand, not a bank balance.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
