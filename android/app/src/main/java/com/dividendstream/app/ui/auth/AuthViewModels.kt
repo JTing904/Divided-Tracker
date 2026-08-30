@@ -130,16 +130,36 @@ class LoginViewModel(
     }
 
     /**
-     * Signs in to Firebase with the same details, creating the account if this is the first time.
+     * Signs in to Firebase with the same details, creating the account the first time.
      *
-     * Failures are swallowed on purpose. The person is signed in as far as they can tell, and
-     * the ledger being empty until this succeeds is a better outcome than an error about a
-     * second system they were never told existed. It is retried on every sign-in.
+     * The fallback fires on a wrong password as well as on no such user, and it has to.
+     * Firebase projects protect against email enumeration by default, which means signing in
+     * to an account that does not exist is answered with "those credentials do not match"
+     * rather than "no such account" -- indistinguishable, on purpose, from a typo. Treating
+     * only the second as a reason to create left the account never created and nothing said.
+     *
+     * If creating then reports the email is taken, the password really was wrong, and that is
+     * worth surfacing: silence here is a ledger that stays empty for reasons nobody can see.
      */
     private suspend fun mirrorToFirebase(name: String, email: String, password: String) {
         val session = firebase ?: return
-        if (session.signIn(email, password) == "NO_SUCH_USER") {
-            session.createAccount(name, email, password)
+        val signedIn = session.signIn(email, password) ?: return
+        if (signedIn != "NO_SUCH_USER" && signedIn != "INVALID_CREDENTIALS") return
+
+        val created = session.createAccount(name, email, password) ?: return
+        _state.update {
+            it.copy(
+                error = AppError(
+                    code = "LEDGER_NOT_CONNECTED",
+                    message = if (created == "EMAIL_TAKEN") {
+                        "Signed in, but your ledger uses a different password here. " +
+                            "Sign in again with it to reconnect."
+                    } else {
+                        "Signed in, but your ledger could not be connected. Try again."
+                    },
+                    isRetryable = true,
+                ),
+            )
         }
     }
 

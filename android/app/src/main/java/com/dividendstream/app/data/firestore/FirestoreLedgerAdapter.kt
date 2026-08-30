@@ -1,9 +1,11 @@
 package com.dividendstream.app.data.firestore
 
+import com.dividendstream.app.core.AppError
 import com.dividendstream.app.data.repository.LedgerResult
 import com.dividendstream.app.data.repository.LedgerSource
 import com.dividendstream.app.domain.StoredFlow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.math.BigDecimal
@@ -28,6 +30,19 @@ class FirestoreLedgerAdapter(
             // it *is* the copy, and anything newer arrives as another emission rather than as
             // a reason to apologise for this one.
             .map { LedgerResult(ledger = it, isStale = false) }
+            // Turned into a result rather than left to escape as a crash: an account that is
+            // not connected yet is a thing to tell somebody, not a thing to fall over on.
+            .catch { failure ->
+                emit(
+                    LedgerResult(
+                        ledger = null,
+                        error = AppError(
+                            code = "NOT_CONNECTED",
+                            message = failure.message ?: "Sign in again to connect your ledger.",
+                        ),
+                    ),
+                )
+            }
 
     override suspend fun saveFlow(
         id: String,

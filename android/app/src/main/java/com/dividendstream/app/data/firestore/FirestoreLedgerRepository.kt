@@ -6,11 +6,10 @@ import com.dividendstream.app.domain.LedgerCalculator
 import com.dividendstream.app.domain.StoredEntry
 import com.dividendstream.app.domain.StoredFlow
 import com.dividendstream.app.domain.StoredFund
-import com.dividendstream.app.domain.StoredLedger
 import com.dividendstream.app.domain.StoredMovement
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -41,6 +40,15 @@ class FirestoreLedgerRepository(
         session.current?.let { FirestoreLedgerSource(firestore, it.uid) }
 
     /**
+     * The store, or an explanation of why there isn't one.
+     *
+     * Writes used to skip quietly when nobody was signed in here, so pressing Save on a RM1
+     * record did nothing at all and said nothing at all -- which is indistinguishable from the
+     * app being broken, and worse than an error, because there was nothing to act on.
+     */
+    private fun writable(): FirestoreLedgerSource = source() ?: throw NotSignedInToFirestore()
+
+    /**
      * The ledger, recomputed whenever what is stored changes.
      *
      * A month that has finished is banked as a side effect of being read, which is where it
@@ -49,7 +57,13 @@ class FirestoreLedgerRepository(
      * rewrite what August put aside.
      */
     fun ledger(period: String, browsing: YearMonth?): Flow<LedgerDto> {
-        val source = source() ?: return flowOf(empty())
+        // Signed in to the API but not to Firestore. It happens whenever the app restores a
+        // session rather than being signed into, and it used to produce an empty ledger and no
+        // explanation -- which reads exactly like the ledger having been lost. It is now an
+        // error the screen can show, and one the person can act on: sign in again.
+        val source = source() ?: return flow {
+            throw NotSignedInToFirestore()
+        }
         val currency = session.current?.baseCurrency ?: "MYR"
         return source.stream(currency).map { stored ->
             val result = LedgerCalculator.calculate(stored, period, browsing, clock.now(), zone)
@@ -81,7 +95,7 @@ class FirestoreLedgerRepository(
         startsOn: LocalDate,
         endsOn: LocalDate?,
     ) {
-        source()?.put(
+        writable().put(
             StoredFlow(
                 id = id, name = name, direction = direction, amount = amount, period = period,
                 category = category, arrivesOn = arrivesOn, arrivesMonth = arrivesMonth,
@@ -98,14 +112,12 @@ class FirestoreLedgerRepository(
      * in place would recompute every finished month at the new figure.
      */
     suspend fun splitFlow(existing: StoredFlow, successorId: String, effectiveFrom: LocalDate, updated: StoredFlow) {
-        val source = source() ?: return
+        val source = writable()
         source.put(existing.copy(endsOn = effectiveFrom.minusDays(1)))
         source.put(updated.copy(id = successorId, startsOn = effectiveFrom, endsOn = existing.endsOn))
     }
 
-    suspend fun deleteFlow(id: String) {
-        source()?.deleteFlow(id)
-    }
+    suspend fun deleteFlow(id: String) = writable().deleteFlow(id)
 
     suspend fun saveEntry(
         id: String,
@@ -115,23 +127,19 @@ class FirestoreLedgerRepository(
         category: String?,
         note: String?,
     ) {
-        source()?.put(StoredEntry(id, occurredOn, direction, amount, category, note))
+        writable().put(StoredEntry(id, occurredOn, direction, amount, category, note))
     }
 
-    suspend fun deleteEntry(id: String) {
-        source()?.deleteEntry(id)
-    }
+    suspend fun deleteEntry(id: String) = writable().deleteEntry(id)
 
     suspend fun saveFund(id: String, name: String, percent: BigDecimal, icon: String?, position: Int = 0) {
-        val source = source() ?: return
+        val source = writable()
         // createdAt decides which months settlement walks back through, so it is written once
         // and never touched again -- merge leaves the original in place on a later edit.
         source.put(StoredFund(id, name, percent, icon, position, clock.now()))
     }
 
-    suspend fun deleteFund(id: String) {
-        source()?.deleteFund(id)
-    }
+    suspend fun deleteFund(id: String) = writable().deleteFund(id)
 
     suspend fun saveFundMovement(
         id: String,
@@ -141,14 +149,20 @@ class FirestoreLedgerRepository(
         occurredOn: LocalDate,
         note: String?,
     ) {
-        source()?.put(StoredMovement(id, fundId, occurredOn, direction, amount, note))
+        writable().put(StoredMovement(id, fundId, occurredOn, direction, amount, note))
     }
 
-    suspend fun deleteFundMovement(id: String) {
-        source()?.deleteMovement(id)
-    }
+    suspend fun deleteFundMovement(id: String) = writable().deleteMovement(id)
 
-    /** What a signed-out screen shows: nothing, rather than a stale somebody else's. */
-    private fun empty(): LedgerDto =
-        LedgerCalculator.calculate(StoredLedger(), "MONTH", null, clock.now(), zone).ledger
 }
+
+/**
+ * Signed in here, but not to the store the ledger lives in.
+ *
+ * Its own type because the screen has something specific and useful to say about it, and
+ * because it is emphatically not "no data" -- the data is elsewhere, intact, waiting for an
+ * account that has not been connected yet.
+ */
+class NotSignedInToFirestore : IllegalStateException(
+    "Sign in again to finish connecting your ledger.",
+)
