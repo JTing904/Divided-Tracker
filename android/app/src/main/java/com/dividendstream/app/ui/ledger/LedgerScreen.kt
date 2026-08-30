@@ -758,8 +758,9 @@ private fun FundRow(
     onOpen: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
-    // Straight from the server. What a fund holds steps when a payment lands rather than
-    // climbing by the second, so there is nothing to redraw between refreshes.
+    // What has been banked. This month's share is on its way and is shown as such below,
+    // never added in: it is still part of what is left over, and counting it in both places
+    // made one recorded lunch look like two deductions.
     val holding = fund.balance
     val collected = fund.accruedThisMonth
     val target = fund.plannedThisMonth
@@ -823,8 +824,8 @@ private fun FundRow(
                 holding.signum() < 0 && target.signum() > 0 ->
                     "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
                 target.signum() > 0 ->
-                    "${collected.formatMoney(ledger.currency)} in, of " +
-                        "${target.formatMoney(ledger.currency)} expected this month"
+                    "${collected.formatMoney(ledger.currency)} on its way, of " +
+                        "${target.formatMoney(ledger.currency)} this month"
                 else -> "Nothing to put aside this month"
             },
             style = MaterialTheme.typography.bodySmall,
@@ -848,11 +849,15 @@ internal fun MovementRow(
     onDelete: () -> Unit,
 ) {
     val deposit = movement.direction == "DEPOSIT"
+    // A month the app banked is not a person's to correct. Editing one would be overruled by
+    // the next settlement, and deleting it would simply be written again -- so neither is
+    // offered, and the row says whose it is instead.
+    val settled = movement.source == "MONTHLY_SHARE"
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onEdit)
+            .then(if (settled) Modifier else Modifier.clickable(onClick = onEdit))
             .padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -874,13 +879,23 @@ internal fun MovementRow(
             style = MaterialTheme.typography.bodySmall,
             color = if (deposit) DividendColors.Growth else DividendColors.Danger,
         )
-        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-            Icon(
-                Icons.Default.Delete,
-                contentDescription = "Remove this entry",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
+        if (settled) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "auto",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.width(6.dp))
+        } else {
+            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Remove this entry",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
@@ -28,6 +29,8 @@ class LedgerIntegrationTest {
 
     @Autowired private lateinit var mockMvc: MockMvc
     @Autowired private lateinit var objectMapper: ObjectMapper
+    @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var entityManager: jakarta.persistence.EntityManager
 
     @Test
     @DisplayName("a salary starts accruing per second without anything being written per second")
@@ -359,9 +362,57 @@ class LedgerIntegrationTest {
         val expected = BigDecimal(daysFinished).multiply(BigDecimal("30.00"))
 
         assertThat(fund["paidIn"].money()).isEqualByComparingTo(BigDecimal.ZERO)
-        assertThat(fund["balance"].money()).isEqualByComparingTo(expected)
-        // Today's RM60 is on its way and is not in the fund.
+        // On its way, not in: this month's share is still part of what is left over and is
+        // banked when the month finishes. Nothing has been paid into this fund by hand, and
+        // no month has finished since it was made, so it holds nothing yet.
         assertThat(fund["accruedThisMonth"].money()).isEqualByComparingTo(expected)
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    @DisplayName("a finished month is banked into the fund as a movement anyone can see")
+    fun `a finished month is settled once`() {
+        val token = register("settler@example.com")
+        saveFlow(token, """{"name":"Allowance","direction":"INCOME","amount":"100.00","period":"DAILY"}""")
+        val fundId = objectMapper.readTree(
+            saveFund(token, """{"name":"Emergency","percent":"50.00"}"""),
+        )["id"].asText()
+
+        // Settlement walks from the month the fund was made in, and there is no API for making
+        // one in the past. Backdating it here is the only way to have a finished month at all.
+        //
+        // Flushed first: the writes above went through MockMvc inside this test's transaction
+        // and are still sitting in the persistence context. Raw SQL against rows that are not
+        // in the database yet updates nothing at all, silently.
+        entityManager.flush()
+        val lastMonth = YearMonth.now().minusMonths(1)
+        jdbc.update(
+            "UPDATE funds SET created_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.from(lastMonth.atDay(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant()),
+            fundId,
+        )
+        // The flow has to have been live in it too, or the month put nothing aside.
+        jdbc.update("UPDATE cash_flows SET starts_on = ? WHERE user_id IN (SELECT user_id FROM funds WHERE id = ?::uuid)",
+            java.sql.Date.valueOf(lastMonth.atDay(1)), fundId)
+        // And cleared afterwards, so the service reads the backdated rows rather than the
+        // ones Hibernate still has in hand.
+        entityManager.clear()
+
+        val fund = ledger(token)["funds"][0]
+        val share = BigDecimal(lastMonth.lengthOfMonth()).multiply(BigDecimal("50.00"))
+
+
+        // A real row, dated the day the month stopped being the current one, and labelled.
+        val settlement = fund["movements"].first { it["source"].asText() == "MONTHLY_SHARE" }
+        assertThat(settlement["settledMonth"].asText()).isEqualTo(lastMonth.toString())
+        assertThat(settlement["occurredOn"].asText()).isEqualTo(lastMonth.plusMonths(1).atDay(1).toString())
+        assertThat(settlement["amount"].money()).isEqualByComparingTo(share)
+        assertThat(fund["balance"].money()).isEqualByComparingTo(share)
+
+        // Reading again banks nothing further: the month is settled, not re-settled.
+        val again = ledger(token)["funds"][0]
+        assertThat(again["movements"].count { it["source"].asText() == "MONTHLY_SHARE" }).isEqualTo(1)
+        assertThat(again["balance"].money()).isEqualByComparingTo(share)
     }
 
     @Test
@@ -389,7 +440,7 @@ class LedgerIntegrationTest {
         val received = if (bonusArrived) BigDecimal("3500.00") else BigDecimal("3000.00")
 
         assertThat(body["monthReceivedNet"].money()).isEqualByComparingTo(received)
-        assertThat(body["funds"][0]["balance"].money())
+        assertThat(body["funds"][0]["accruedThisMonth"].money())
             .isEqualByComparingTo(received.divide(BigDecimal("2")))
 
         // Both are in the projection, which is a projection of the whole month.
@@ -467,7 +518,8 @@ class LedgerIntegrationTest {
 
         assertThat(fund["accruedThisMonth"].money()).isEqualByComparingTo(BigDecimal("100.00"))
         assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("100.00"))
-        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        // Reaches the fund's share, which is a different thing from being banked in it.
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
 
         // The client redraws the share every frame from the month's own figures rather than
         // from the flows, so it needs the month's total and the month's rate.
@@ -492,7 +544,8 @@ class LedgerIntegrationTest {
 
         // The funds are a running position, so they answer from the month it is now however
         // far back the rest of the screen is looking.
-        assertThat(past["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(past["funds"][0]["accruedThisMonth"].money())
+            .isEqualByComparingTo(BigDecimal("100.00"))
         assertThat(past["monthNetAccrued"].money()).isEqualByComparingTo(BigDecimal("200.00"))
     }
 
@@ -550,7 +603,8 @@ class LedgerIntegrationTest {
 
         // Switching to today must not make a fund appear to shrink, so both the fund and the
         // figure the client rebuilds it from stay the month's.
-        assertThat(day["funds"][0]["balance"].money()).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(day["funds"][0]["accruedThisMonth"].money())
+            .isEqualByComparingTo(BigDecimal("100.00"))
         assertThat(day["monthNetAccrued"].money()).isEqualByComparingTo(BigDecimal("200.00"))
     }
 

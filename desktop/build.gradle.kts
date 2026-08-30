@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.dividendstream"
-version = "1.0.14"
+version = "1.0.15"
 
 kotlin {
     jvmToolchain(21)
@@ -108,7 +108,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "Dividend Stream"
-            packageVersion = "1.0.14"
+            packageVersion = "1.0.15"
             description = "Watch your expected dividends accumulate in real time"
             vendor = "Dividend Stream"
 

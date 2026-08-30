@@ -141,6 +141,15 @@ class FundEntity(
 enum class FundMovementDirection { DEPOSIT, WITHDRAWAL }
 
 /**
+ * Who made a movement.
+ *
+ * [HAND] is a person moving their own money. [MONTHLY_SHARE] is the app banking a finished
+ * month's percentage, which is the one thing it does on their behalf -- and it is told apart
+ * so that "put in by hand" keeps meaning what it says.
+ */
+enum class FundMovementSource { HAND, MONTHLY_SHARE }
+
+/**
  * Money actually put into, or taken out of, a fund.
  *
  * A fact, like [LedgerEntryEntity] and unlike [FundEntity]'s share of the surplus. Nothing
@@ -175,4 +184,17 @@ class FundMovementEntity(
 
     @Column(name = "note", length = 200)
     var note: String? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false, length = 16)
+    var source: FundMovementSource = FundMovementSource.HAND,
+
+    /**
+     * Which month a [FundMovementSource.MONTHLY_SHARE] row banks, as `2026-08`. Null otherwise.
+     *
+     * A unique index over (fund, this) is what makes settling on read safe: two requests
+     * arriving together cannot bank August twice, because the second insert loses.
+     */
+    @Column(name = "settled_month", length = 7)
+    var settledMonth: String? = null,
 ) : AuditableEntity()

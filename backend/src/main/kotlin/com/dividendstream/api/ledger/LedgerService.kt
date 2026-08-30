@@ -5,6 +5,7 @@ import com.dividendstream.api.common.Money
 import com.dividendstream.api.common.NotFoundException
 import com.dividendstream.api.config.LedgerProperties
 import com.dividendstream.api.user.UserRepository
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -38,7 +39,16 @@ class LedgerService(
     private val clock: Clock,
 ) {
 
-    @Transactional(readOnly = true)
+    /**
+     * Not read-only any more, and only for this: a month that has finished is banked into each
+     * fund as a real movement the first time anybody looks after it ended.
+     *
+     * A schedule would have been tidier and does not work here -- the server sleeps between
+     * uses, so a job set for the first of the month is a job that gets missed. Settling on
+     * read costs at most one insert per fund per month; every poll after that writes nothing,
+     * so this is still safe to call as often as the screen likes.
+     */
+    @Transactional
     fun ledger(
         userId: UUID,
         period: LedgerPeriod = LedgerPeriod.MONTH,
@@ -129,6 +139,7 @@ class LedgerService(
         val keptBeforeThisMonth = keptBeforeThisMonth(userId, flows, now, zone)
 
         val funds = fundRepository.findAllByUserIdOrderByPositionAscCreatedAtAsc(userId)
+        settleFinishedMonths(userId, funds, flows, now, zone)
         val allocated = funds.fold(BigDecimal.ZERO) { sum, it -> sum + it.percent }
             .setScale(PERCENT_SCALE, RoundingMode.HALF_UP)
         // One query for every fund's movements rather than one per fund.
@@ -192,6 +203,82 @@ class LedgerService(
             entries = entries.map { it.describe() },
             months = monthlyTotals(userId, now, zone),
         )
+    }
+
+    /**
+     * Banks every finished month that has not been banked yet, as a movement per fund.
+     *
+     * Walked from the month each fund was created in, so a fund made in June does not collect
+     * a share of April. A month that ran a deficit banks nothing rather than a zero row: an
+     * empty line in a history is noise, and the absence says the same thing.
+     *
+     * The unique index on (fund, settled_month) is what makes this safe to run from a read.
+     * Two requests arriving together both try to insert August; one wins, the other is
+     * rejected by the database and the month stays banked exactly once. The loser's failure is
+     * swallowed here because it is not a failure -- the work it wanted done is done.
+     */
+    private fun settleFinishedMonths(
+        userId: UUID,
+        funds: List<FundEntity>,
+        flows: List<CashFlowEntity>,
+        now: Instant,
+        zone: java.time.ZoneId,
+    ) {
+        if (funds.isEmpty()) return
+        val thisMonth = YearMonth.from(LocalDate.ofInstant(now, zone))
+        val already = movementRepository.findAllByUserIdAndSettledMonthIsNotNull(userId)
+            .groupBy { it.fundId }
+            .mapValues { (_, rows) -> rows.mapNotNull { it.settledMonth }.toSet() }
+
+        // One query for every record any of these months might contain.
+        val earliest = funds.minOf { YearMonth.from(LocalDate.ofInstant(it.createdAt, zone)) }
+        if (!earliest.isBefore(thisMonth)) return
+        val recordedByMonth = entryRepository
+            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
+                userId, earliest.atDay(1), thisMonth.atDay(1).minusDays(1),
+            )
+            .groupBy { YearMonth.from(it.occurredOn) }
+            .mapValues { (_, rows) ->
+                rows.sumAmount(FlowDirection.INCOME).subtract(rows.sumAmount(FlowDirection.EXPENSE))
+            }
+
+        val pending = mutableListOf<FundMovementEntity>()
+        for (fund in funds) {
+            val settled = already[fund.id].orEmpty()
+            val share = fund.percent.divide(HUNDRED, SHARE_SCALE, RoundingMode.HALF_UP)
+            var month = YearMonth.from(LocalDate.ofInstant(fund.createdAt, zone))
+            var guard = 0
+            while (month.isBefore(thisMonth) && guard++ < MAX_HISTORY_MONTHS) {
+                val key = month.toString()
+                if (key !in settled) {
+                    val surplus = surplusOver(
+                        CashFlowEngine.monthOf(month.atDay(1), zone), flows, recordedByMonth, zone,
+                    )
+                    val amount = Money.amount(surplus.multiply(share))
+                    if (surplus.signum() > 0 && amount.signum() > 0) {
+                        pending += FundMovementEntity(
+                            userId = userId,
+                            fundId = fund.id,
+                            // Dated the day it was banked, which is the day after the month it
+                            // banks -- the same day the money stopped being this month's.
+                            occurredOn = month.plusMonths(1).atDay(1),
+                            direction = FundMovementDirection.DEPOSIT,
+                            amount = amount,
+                            note = "${month.month.name.lowercase().replaceFirstChar { it.uppercase() }} share",
+                            source = FundMovementSource.MONTHLY_SHARE,
+                            settledMonth = key,
+                        )
+                    }
+                }
+                month = month.plusMonths(1)
+            }
+        }
+        if (pending.isEmpty()) return
+        runCatching { movementRepository.saveAll(pending) }
+            .onFailure {
+                // Another request banked the same month first. Nothing to do and nothing wrong.
+                if (it !is DataIntegrityViolationException) throw it
+            }
     }
 
     /**
@@ -566,13 +653,24 @@ class LedgerService(
         zone: java.time.ZoneId,
     ): FundResponse {
         val share = percent.divide(HUNDRED, SHARE_SCALE, RoundingMode.HALF_UP)
+        // Everything, the app's settlements included: this is the balance, and a settled
+        // month is as much a part of it as a deposit. What each half came from is reported
+        // separately so the screen can keep "by hand" honest.
         val paidIn = movements.total(FundMovementDirection.DEPOSIT)
         val takenOut = movements.total(FundMovementDirection.WITHDRAWAL)
         fun of(total: BigDecimal, round: (BigDecimal) -> BigDecimal) =
             if (total.signum() <= 0) round(BigDecimal.ZERO) else round(total.multiply(share))
 
-        val fromEarlierMonths = earmarkedBeforeThisMonth(share, flows, now, zone)
-        val carriedOver = fromEarlierMonths.add(paidIn).subtract(takenOut)
+        // Read back rather than derived. Every finished month since this fund was made has
+        // been banked as a movement, so the balance is a sum over rows a person can see --
+        // and editing a salary today no longer rewrites what August put aside.
+        val fromEarlierMonths = movements
+            .filter { it.source == FundMovementSource.MONTHLY_SHARE }
+            .fold(BigDecimal.ZERO) { sum, it ->
+                if (it.direction == FundMovementDirection.DEPOSIT) sum.add(it.amount)
+                else sum.subtract(it.amount)
+            }
+        val carriedOver = paidIn.subtract(takenOut)
         val thisMonth = of(netAccrued, Money::accrual)
 
         return FundResponse(
@@ -586,67 +684,22 @@ class LedgerService(
             accruedThisMonth = thisMonth,
             carriedOver = Money.amount(carriedOver),
             earmarkedEarlier = Money.amount(fromEarlierMonths),
-            balance = Money.accrual(carriedOver.add(thisMonth)),
+            // Banked only: finished months, and what was moved by hand. This month's share is
+            // reported beside it as [accruedThisMonth] and is deliberately not counted here.
+            //
+            // It used to be. The trouble was that one recorded lunch then moved two headline
+            // figures at once -- what is left over, and what the funds hold -- and two big
+            // numbers falling by the same amount on the same screen read as the money being
+            // taken twice. It was not, but a person should not have to be told that. This
+            // month's leftover is still in the leftover; it reaches the funds when the month
+            // is done with it.
+            balance = Money.amount(carriedOver),
             paidIn = Money.amount(paidIn),
             takenOut = Money.amount(takenOut),
             movements = movements.map { it.describe() },
         )
     }
 
-    /**
-     * This fund's share of every month that has already finished, since it was created.
-     *
-     * The plan fills the fund by itself. Making somebody press a button each month to bank
-     * their own allocation would leave a fund reading zero for anyone who forgot -- not a
-     * truer number, just a less useful one, and not what setting a percentage means.
-     *
-     * Each past month is recomputed from the flows as they stand, with their start and end
-     * dates respected: a month before a salary began contributes nothing, because the flow was
-     * not live in it. What this cannot know is that the salary was a different figure back
-     * then -- a raise entered today is applied backwards. That is the price of deriving the
-     * history rather than storing a total per month, and it is why this is labelled a
-     * projection everywhere it appears, beside the withdrawals, which are facts.
-     */
-    private fun FundEntity.earmarkedBeforeThisMonth(
-        share: BigDecimal,
-        flows: List<CashFlowEntity>,
-        now: Instant,
-        zone: java.time.ZoneId,
-    ): BigDecimal {
-        val thisMonth = LocalDate.ofInstant(now, zone).withDayOfMonth(1)
-        var month = LocalDate.ofInstant(createdAt, zone).withDayOfMonth(1)
-        var total = BigDecimal.ZERO
-        var guard = 0
-
-        // Every record the person has, grouped by the month it happened in. One query, and it
-        // is the same set of rows however many months are walked below.
-        val recordedByMonth = entryRepository
-            .findAllByUserIdAndOccurredOnBetweenOrderByOccurredOnDescCreatedAtDesc(
-                userId, month, thisMonth.minusDays(1),
-            )
-            .groupBy { YearMonth.from(it.occurredOn) }
-            .mapValues { (_, rows) ->
-                rows.sumAmount(FlowDirection.INCOME).subtract(rows.sumAmount(FlowDirection.EXPENSE))
-            }
-
-        while (month.isBefore(thisMonth) && guard++ < MAX_HISTORY_MONTHS) {
-            val surplus = surplusOver(CashFlowEngine.monthOf(month, zone), flows, recordedByMonth, zone)
-            // A month that ran a deficit puts nothing aside, and takes nothing back out
-            // either: the fund did not pay the rent.
-            if (surplus.signum() > 0) total = total.add(surplus.multiply(share))
-            month = month.plusMonths(1)
-        }
-        return total
-    }
-
-    /**
-     * Income minus outgoings across a whole month: the flows that were live during it, and
-     * whatever was written down in it.
-     *
-     * The records belong here for the same reason they belong in this month's figure. A fund
-     * takes a share of what was actually left over, and a month with RM800 of unplanned
-     * spending in it did not leave as much over as the plan alone suggests.
-     */
     private fun surplusOver(
         month: Window,
         flows: List<CashFlowEntity>,
@@ -675,6 +728,8 @@ class LedgerService(
         direction = direction,
         amount = amount,
         note = note,
+        source = source.name,
+        settledMonth = settledMonth,
     )
 
     private fun List<FundMovementEntity>.total(direction: FundMovementDirection): BigDecimal =

@@ -233,7 +233,7 @@ private fun FundBalanceCard(fund: FundDto, ledger: LedgerDto) {
         else collected.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
 
     DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
-        OverlineText(if (borrowed) "owed back to this fund" else "in the fund")
+        OverlineText(if (borrowed) "owed back to this fund" else "banked in this fund")
         Spacer(Modifier.height(8.dp))
         Text(
             (if (borrowed) "-" else "") + holding.abs().formatAmount(Precision.AMOUNT),
@@ -256,8 +256,8 @@ private fun FundBalanceCard(fund: FundDto, ledger: LedgerDto) {
                 borrowed && target.signum() > 0 ->
                     "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
                 target.signum() > 0 ->
-                    "${collected.formatMoney(ledger.currency)} in, of " +
-                        "${target.formatMoney(ledger.currency)} expected this month"
+                    "${collected.formatMoney(ledger.currency)} on its way, of " +
+                        "${target.formatMoney(ledger.currency)} this month"
                 else -> "Nothing to put aside this month"
             },
             style = MaterialTheme.typography.bodyMedium,
@@ -265,8 +265,9 @@ private fun FundBalanceCard(fund: FundDto, ledger: LedgerDto) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "${fund.percent.formatPercent(0)} of whatever is left over, every month. It goes " +
-                "in when the money actually arrives, not while it is on its way.",
+            "${fund.percent.formatPercent(0)} of whatever is left over. This month's share is " +
+                "still part of what is left over -- it is banked here when the month ends, " +
+                "which is why spending today moves that figure and not this one.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -276,17 +277,26 @@ private fun FundBalanceCard(fund: FundDto, ledger: LedgerDto) {
 /** In, out, and what the two come to. Counted from the movements, not the balance. */
 @Composable
 private fun MovementTotals(fund: FundDto, currency: String) {
-    val paidIn = fund.movements
+    // Told apart, because "put in by hand" sitting beside a balance it does not explain was
+    // read as the balance being partly imaginary. It was not; the rest was the app's own
+    // monthly settlements, which now have a column of their own.
+    val byHand = fund.movements.filter { it.source != "MONTHLY_SHARE" }
+    val paidIn = byHand
         .filter { it.direction == "DEPOSIT" }
         .fold(BigDecimal.ZERO) { sum, it -> sum.add(it.amount) }
-    val takenOut = fund.movements
+    val takenOut = byHand
         .filter { it.direction == "WITHDRAWAL" }
         .fold(BigDecimal.ZERO) { sum, it -> sum.add(it.amount) }
+    val banked = fund.movements
+        .filter { it.source == "MONTHLY_SHARE" }
+        .fold(BigDecimal.ZERO) { sum, it ->
+            if (it.direction == "DEPOSIT") sum.add(it.amount) else sum.subtract(it.amount)
+        }
 
     DsCard(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                OverlineText("put in")
+                OverlineText("put in by hand")
                 Text(
                     paidIn.formatMoney(currency),
                     style = MonoFigure,
@@ -294,7 +304,7 @@ private fun MovementTotals(fund: FundDto, currency: String) {
                 )
             }
             Column(Modifier.weight(1f)) {
-                OverlineText("taken out")
+                OverlineText("taken out by hand")
                 Text(
                     takenOut.formatMoney(currency),
                     style = MonoFigure,
@@ -302,9 +312,9 @@ private fun MovementTotals(fund: FundDto, currency: String) {
                 )
             }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                OverlineText("by hand")
+                OverlineText("months banked")
                 Text(
-                    paidIn.subtract(takenOut).formatMoney(currency),
+                    banked.formatMoney(currency),
                     style = MonoFigure,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

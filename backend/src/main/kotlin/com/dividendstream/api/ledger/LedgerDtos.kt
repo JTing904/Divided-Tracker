@@ -191,7 +191,12 @@ data class FundResponse(
     val ratePerSecond: BigDecimal,
     /** Its share of the whole month's projected surplus. */
     val plannedThisMonth: BigDecimal,
-    /** Its share of the surplus accrued so far, at `serverTime`. */
+    /**
+     * Its share of this month's leftover so far, at `serverTime`.
+     *
+     * On its way rather than in: it is still part of what is left over, and it reaches
+     * [balance] when the month finishes. Shown beside the balance, never added to it.
+     */
     val accruedThisMonth: BigDecimal,
 
     /**
@@ -233,6 +238,10 @@ data class FundMovementResponse(
     val direction: FundMovementDirection,
     val amount: BigDecimal,
     val note: String?,
+    /** HAND, or MONTHLY_SHARE for a month the app banked. */
+    val source: String = "HAND",
+    /** The month a MONTHLY_SHARE row banks, as `2026-08`. Null for anything done by hand. */
+    val settledMonth: String? = null,
 )
 
 /** A per-second figure restated over horizons a person thinks in, on the real calendar. */

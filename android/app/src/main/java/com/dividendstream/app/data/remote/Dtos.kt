@@ -431,6 +431,10 @@ data class FundMovementDto(
     val direction: String,
     val amount: BigDecimal,
     val note: String? = null,
+    /** HAND, or MONTHLY_SHARE for a month the app banked on your behalf. */
+    val source: String = "HAND",
+    /** The month a MONTHLY_SHARE row banks, as `2026-08`. Null for anything done by hand. */
+    val settledMonth: String? = null,
 )
 
 @Serializable

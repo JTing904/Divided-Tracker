@@ -43,4 +43,7 @@ interface FundMovementRepository : JpaRepository<FundMovementEntity, UUID> {
     fun findAllByFundIdOrderByOccurredOnDescCreatedAtDesc(fundId: UUID): List<FundMovementEntity>
 
     fun findByIdAndUserId(id: UUID, userId: UUID): Optional<FundMovementEntity>
+
+    /** Which months are already banked, so settling can start where it left off. */
+    fun findAllByUserIdAndSettledMonthIsNotNull(userId: UUID): List<FundMovementEntity>
 }
