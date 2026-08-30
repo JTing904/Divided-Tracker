@@ -24,8 +24,6 @@ import com.dividendstream.app.domain.AccumulationCalculator
 import com.dividendstream.app.ui.theme.DividendColors
 import com.dividendstream.app.ui.theme.LiveCounterFigure
 import java.math.BigDecimal
-import java.time.Duration
-import java.time.Instant
 
 /**
  * What is left over, right now: income accrued this month minus outgoings accrued this month.
@@ -48,49 +46,6 @@ fun rememberNetAccrued(streams: LedgerStreams, clock: ServerClock): State<BigDec
                 .subtract(AccumulationCalculator.totalAccruedAt(streams.expense, clock.now()))
 
         // Paint the correct value immediately rather than waiting for the first frame.
-        amount.value = net()
-        while (true) {
-            withFrameNanos { }
-            amount.value = net()
-        }
-    }
-
-    return amount
-}
-
-/**
- * The month's surplus, as the funds see it: the server's figure, carried forward by its rate.
- *
- * Not rebuilt from the flows, and that is the whole point. The flows arrive windowed to
- * whichever period is on screen, so on the day view they have accrued a few hours rather than
- * a few weeks -- and a fund, whose share is a share of a *month*, came out smaller on the day
- * view than on the month view for no reason a person could see. Worse, it was a mixture:
- * today's flows plus the whole month's records, which is neither figure.
- *
- * So this takes `monthNetAccrued` -- what the month was worth at `serverTime`, records and all
- * -- and adds the month's rate multiplied by the time since. The same arithmetic the server
- * did, from the server's own numbers, which is what makes the two agree by construction rather
- * than by both being derived correctly and separately.
- *
- * Whole seconds, matching [AccumulationCalculator]: the counters would otherwise disagree in
- * their trailing digits for no better reason than one of them reading a finer clock.
- */
-@Composable
-fun rememberMonthNet(
-    accruedAtServerTime: BigDecimal,
-    ratePerSecond: BigDecimal,
-    serverTime: Instant,
-    clock: ServerClock,
-): State<BigDecimal> {
-    val amount = remember { mutableStateOf(accruedAtServerTime) }
-
-    LaunchedEffect(accruedAtServerTime, ratePerSecond, serverTime, clock) {
-        fun net(): BigDecimal {
-            val elapsed = Duration.between(serverTime, clock.now()).seconds
-            if (elapsed <= 0L) return accruedAtServerTime
-            return accruedAtServerTime.add(ratePerSecond.multiply(BigDecimal.valueOf(elapsed)))
-        }
-
         amount.value = net()
         while (true) {
             withFrameNanos { }

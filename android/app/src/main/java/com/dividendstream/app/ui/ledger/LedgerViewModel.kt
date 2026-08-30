@@ -278,6 +278,7 @@ class LedgerViewModel(
         amount: BigDecimal,
         period: String,
         category: String?,
+        arrivesOn: Int? = null,
         startsOn: LocalDate? = null,
         endsOn: LocalDate? = null,
         onSaved: () -> Unit = {},
@@ -289,6 +290,7 @@ class LedgerViewModel(
             amount = amount,
             period = period,
             category = category,
+            arrivesOn = arrivesOn,
             startsOn = startsOn,
             endsOn = endsOn,
         )

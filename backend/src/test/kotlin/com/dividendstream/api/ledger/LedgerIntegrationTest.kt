@@ -345,18 +345,111 @@ class LedgerIntegrationTest {
     fun `a fund fills from its percentage`() {
         val token = register("autosaver@example.com")
 
-        saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
-        saveFlow(token, """{"name":"Rent","direction":"EXPENSE","amount":"1000.00","period":"MONTHLY"}""")
+        // Daily, because a fund is filled from money that has arrived and a day's money
+        // arrives when the day is over. Flows start on the first of the month.
+        saveFlow(token, """{"name":"Allowance","direction":"INCOME","amount":"100.00","period":"DAILY"}""")
+        saveFlow(token, """{"name":"Bus","direction":"EXPENSE","amount":"40.00","period":"DAILY"}""")
         saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
 
         val fund = ledger(token)["funds"][0]
 
-        // RM2,000 left over this month; half of it is earmarked, and the fund already holds
-        // whatever share of that has accrued so far. Nobody deposited anything.
-        assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("1000.00"))
+        // Every day but the one being lived through has paid: RM60 left over each, half of it
+        // earmarked. Nobody deposited anything.
+        val daysFinished = LocalDate.now().dayOfMonth - 1
+        val expected = BigDecimal(daysFinished).multiply(BigDecimal("30.00"))
+
         assertThat(fund["paidIn"].money()).isEqualByComparingTo(BigDecimal.ZERO)
-        assertThat(fund["balance"].money()).isGreaterThan(BigDecimal.ZERO)
-        assertThat(fund["balance"].money()).isLessThanOrEqualTo(BigDecimal("1000.00"))
+        assertThat(fund["balance"].money()).isEqualByComparingTo(expected)
+        // Today's RM60 is on its way and is not in the fund.
+        assertThat(fund["accruedThisMonth"].money()).isEqualByComparingTo(expected)
+    }
+
+    @Test
+    @DisplayName("a wage names its payday, and arrives on it")
+    fun `a monthly flow pays on its payday`() {
+        val today = LocalDate.now()
+        val lastDay = YearMonth.from(today).atEndOfMonth().dayOfMonth
+
+        val token = register("payday@example.com")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+        // The first has always been and gone -- on the first itself it lands at midnight.
+        saveFlow(
+            token,
+            """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY","arrivesOn":1}""",
+        )
+        // The last day has not, unless today is it. Chosen this way so the test says the same
+        // thing on every day of every month rather than skipping itself for most of them.
+        saveFlow(
+            token,
+            """{"name":"Bonus","direction":"INCOME","amount":"500.00","period":"MONTHLY","arrivesOn":$lastDay}""",
+        )
+
+        val body = ledger(token)
+        val bonusArrived = today.dayOfMonth == lastDay
+        val received = if (bonusArrived) BigDecimal("3500.00") else BigDecimal("3000.00")
+
+        assertThat(body["monthReceivedNet"].money()).isEqualByComparingTo(received)
+        assertThat(body["funds"][0]["balance"].money())
+            .isEqualByComparingTo(received.divide(BigDecimal("2")))
+
+        // Both are in the projection, which is a projection of the whole month.
+        assertThat(body["plannedIncome"].money()).isEqualByComparingTo(BigDecimal("3500.00"))
+    }
+
+    @Test
+    @DisplayName("a payday later than the month is long lands on the last day instead")
+    fun `a payday of 31 is clamped`() {
+        val token = register("clamped@example.com")
+        saveFlow(
+            token,
+            """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY","arrivesOn":31}""",
+        )
+
+        val flow = ledger(token)["flows"][0]
+        assertThat(flow["arrivesOn"].asInt()).isEqualTo(31)
+
+        // Paid on the last day of the month, whichever day that is -- so it has not arrived
+        // until the month is over, and February does not swallow it.
+        val lastDay = YearMonth.now().atEndOfMonth()
+        val expected = if (LocalDate.now().isBefore(lastDay)) BigDecimal.ZERO else BigDecimal("3000.00")
+        assertThat(flow["receivedThisMonth"].money()).isEqualByComparingTo(expected)
+    }
+
+    @Test
+    @DisplayName("a payday is dropped when the period cannot use one")
+    fun `a daily flow keeps no payday`() {
+        val token = register("dailypayday@example.com")
+        saveFlow(
+            token,
+            """{"name":"Allowance","direction":"INCOME","amount":"20.00","period":"DAILY","arrivesOn":15}""",
+        )
+
+        // Absent rather than null: the serialiser omits a field it has nothing to say about.
+        val payday = ledger(token)["flows"][0].path("arrivesOn")
+        assertThat(payday.isMissingNode || payday.isNull).isTrue()
+    }
+
+    @Test
+    @DisplayName("a wage is worth nothing until it is paid, however far through the month it is")
+    fun `a monthly flow pays when the month ends`() {
+        val token = register("wageearner@example.com")
+
+        saveFlow(token, """{"name":"Salary","direction":"INCOME","amount":"3000.00","period":"MONTHLY"}""")
+        saveFund(token, """{"name":"Emergency","percent":"50.00"}""")
+
+        val body = ledger(token)
+        val fund = body["funds"][0]
+
+        // The consequence of paying on the period boundary, written down rather than left to
+        // be discovered: a monthly wage lands when the month closes, so for the whole of the
+        // month it is in, the fund holds none of it. That errs behind what a person actually
+        // has, never ahead, and only one of those two mistakes spends money that is not there.
+        assertThat(fund["balance"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(body["monthReceivedNet"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+
+        // The projection still knows about it. That is what a projection is.
+        assertThat(fund["plannedThisMonth"].money()).isEqualByComparingTo(BigDecimal("1500.00"))
+        assertThat(body["monthNetAccrued"].money()).isGreaterThan(BigDecimal.ZERO)
     }
 
     @Test

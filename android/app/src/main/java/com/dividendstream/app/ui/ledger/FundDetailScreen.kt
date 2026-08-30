@@ -43,7 +43,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dividendstream.app.core.Precision
-import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.core.formatAmount
 import com.dividendstream.app.core.formatMoney
 import com.dividendstream.app.core.formatPercent
@@ -144,7 +143,7 @@ fun FundDetailScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                FundBalanceCard(fund, ledger, state.streams, viewModel.serverClock)
+                FundBalanceCard(fund, ledger)
             }
 
             item {
@@ -222,24 +221,16 @@ fun FundDetailScreen(
  * tapped to get here.
  */
 @Composable
-private fun FundBalanceCard(
-    fund: FundDto,
-    ledger: LedgerDto,
-    streams: LedgerStreams,
-    clock: ServerClock,
-) {
+private fun FundBalanceCard(fund: FundDto, ledger: LedgerDto) {
     val badge = LedgerIcon.of(fund.icon)
-    val net by rememberMonthNet(
-        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
-    )
-    val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
-    val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
-    val holding = fund.carriedOver.add(accruing)
+    // The server's figures. A fund steps when money lands; nothing here ticks.
+    val holding = fund.balance
+    val collected = fund.accruedThisMonth
     val target = fund.plannedThisMonth
     val borrowed = holding.signum() < 0
     val progress =
         if (target.signum() <= 0) 0f
-        else accruing.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
+        else collected.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
 
     DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
         OverlineText(if (borrowed) "owed back to this fund" else "in the fund")
@@ -265,8 +256,8 @@ private fun FundBalanceCard(
                 borrowed && target.signum() > 0 ->
                     "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
                 target.signum() > 0 ->
-                    "+${accruing.formatAmount(Precision.AMOUNT)} of " +
-                        "${target.formatMoney(ledger.currency)} this month"
+                    "${collected.formatMoney(ledger.currency)} in, of " +
+                        "${target.formatMoney(ledger.currency)} expected this month"
                 else -> "Nothing to put aside this month"
             },
             style = MaterialTheme.typography.bodyMedium,
@@ -274,8 +265,8 @@ private fun FundBalanceCard(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "${fund.percent.formatPercent(0)} of whatever is left over, every month, " +
-                "collected second by second.",
+            "${fund.percent.formatPercent(0)} of whatever is left over, every month. It goes " +
+                "in when the money actually arrives, not while it is on its way.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

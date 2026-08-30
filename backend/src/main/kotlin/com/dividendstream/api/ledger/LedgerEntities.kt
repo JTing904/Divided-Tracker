@@ -47,6 +47,15 @@ class CashFlowEntity(
     @Column(name = "category", length = 40)
     var category: String? = null,
 
+    /**
+     * Which day of its period this pays on. Null means the day the period ends.
+     *
+     * WEEKLY reads it as an ISO day of week (Monday is 1); MONTHLY as a day of the month,
+     * clamped where the month is shorter. DAILY and YEARLY ignore it.
+     */
+    @Column(name = "arrives_on")
+    var arrivesOn: Short? = null,
+
     @Column(name = "currency", nullable = false, length = 3)
     var currency: String = "MYR",
 

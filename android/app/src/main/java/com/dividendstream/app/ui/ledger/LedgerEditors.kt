@@ -106,10 +106,18 @@ private fun FlowDialog(
         mutableStateOf(LedgerIcon.of(existing?.category).takeIf { existing != null } ?: defaultIcon(income))
     }
     var startsOn by remember { mutableStateOf(existing?.startsOn?.toString() ?: thisMonthStart()) }
+    var payday by remember { mutableStateOf(existing?.arrivesOn?.toString().orEmpty()) }
 
     val parsedAmount = amount.toAmountOrNull()
     val parsedStart = startsOn.toDateOrNull()
-    val canSave = name.isNotBlank() && parsedAmount != null && parsedStart != null && !isSaving
+    // Only weekly and monthly can name a day: a day cannot pay on some other day, and a year
+    // would need a date rather than a number.
+    val paydayApplies = period == "WEEKLY" || period == "MONTHLY"
+    val paydayMax = if (period == "WEEKLY") 7 else 31
+    val parsedPayday = payday.trim().toIntOrNull()?.takeIf { it in 1..paydayMax }
+    val paydayValid = payday.isBlank() || parsedPayday != null
+    val canSave = name.isNotBlank() && parsedAmount != null && parsedStart != null &&
+        paydayValid && !isSaving
 
     EditorScaffold(
         title = if (existing != null) "Edit ${existing.name}" else if (income) "Money coming in" else "Money going out",
@@ -123,6 +131,7 @@ private fun FlowDialog(
                 amount = parsedAmount!!,
                 period = period,
                 category = category.key,
+                arrivesOn = parsedPayday.takeIf { paydayApplies },
                 startsOn = parsedStart,
                 endsOn = existing?.endsOn,
                 onSaved = onDismiss,
@@ -166,6 +175,28 @@ private fun FlowDialog(
             onSelect = { period = it.first },
         )
         Spacer(Modifier.height(16.dp))
+
+        if (paydayApplies) {
+            // A wage is nothing until it lands and all of it after, so the day it lands on is
+            // the difference between a fund holding money and a fund pretending to. Blank is
+            // allowed and means the end of the period, which is what every flow did before
+            // this field existed.
+            DsTextField(
+                label = if (period == "WEEKLY") "Paid on (1 = Monday)" else "Paid on (day of month)",
+                value = payday,
+                onValueChange = { payday = it },
+                placeholder = if (period == "WEEKLY") "5" else "28",
+                keyboardType = KeyboardType.Number,
+                isError = !paydayValid,
+                supportingText = when {
+                    !paydayValid -> "A number from 1 to $paydayMax"
+                    period == "WEEKLY" -> "Leave blank and it counts at the end of the week."
+                    else -> "Leave blank and it counts at the end of the month. 31 means the " +
+                        "last day, whatever that is."
+                },
+            )
+            Spacer(Modifier.height(12.dp))
+        }
 
         DsTextField(
             label = "Running since",

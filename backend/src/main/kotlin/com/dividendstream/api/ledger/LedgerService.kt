@@ -83,6 +83,8 @@ class LedgerService(
 
         val accruedIncome = described.sumAccrued(FlowDirection.INCOME)
         val accruedExpense = described.sumAccrued(FlowDirection.EXPENSE)
+        val receivedIncome = described.sumReceived(FlowDirection.INCOME)
+        val receivedExpense = described.sumReceived(FlowDirection.EXPENSE)
         val actualIncome = entries.sumAmount(FlowDirection.INCOME)
         val actualExpense = entries.sumAmount(FlowDirection.EXPENSE)
 
@@ -106,6 +108,9 @@ class LedgerService(
         // are the same payment would be a worse failure than the one it prevents.
         val recordedNet = settledIncome.subtract(settledExpense)
         val netAccrued = accruedIncome.subtract(accruedExpense).add(recordedNet)
+        // What is actually in hand: paid-out periods and dated records, and nothing that is
+        // merely on its way. This is what the funds take a share of.
+        val receivedNet = receivedIncome.subtract(receivedExpense).add(recordedNet)
 
         val plannedIncome = described.sumExpected(FlowDirection.INCOME).add(actualIncome)
         val plannedExpense = described.sumExpected(FlowDirection.EXPENSE).add(actualExpense)
@@ -116,7 +121,7 @@ class LedgerService(
         // Reusable only when the window *is* this month; a day view or a browsed month has to
         // ask the month its own question.
         val monthly = if (effectivePeriod == LedgerPeriod.MONTH && browsed == null) {
-            MonthFigures(netRate, plannedSurplus, netAccrued)
+            MonthFigures(netRate, plannedSurplus, netAccrued, receivedNet)
         } else {
             monthFigures(userId, flows, month, now, zone)
         }
@@ -132,7 +137,7 @@ class LedgerService(
             .groupBy { it.fundId }
         val describedFunds = funds.map {
             it.describe(
-                monthly.netRate, monthly.plannedSurplus, monthly.netAccrued,
+                monthly.netRate, monthly.plannedSurplus, monthly.received,
                 movements[it.id].orEmpty(), flows, now, zone,
             )
         }
@@ -173,7 +178,7 @@ class LedgerService(
 
             keptBeforeThisMonth = Money.amount(keptBeforeThisMonth),
             monthNetAccrued = Money.accrual(monthly.netAccrued),
-            monthNetRatePerSecond = Money.rate(monthly.netRate),
+            monthReceivedNet = Money.amount(monthly.received),
             keptSoFar = Money.accrual(keptBeforeThisMonth.add(monthly.netAccrued)),
 
             funds = describedFunds,
@@ -247,6 +252,8 @@ class LedgerService(
         val netRate: BigDecimal,
         val plannedSurplus: BigDecimal,
         val netAccrued: BigDecimal,
+        /** The same month counting only money that has landed. What the funds are built on. */
+        val received: BigDecimal,
     )
 
     private fun monthFigures(
@@ -279,6 +286,9 @@ class LedgerService(
                 .add(recorded),
             netAccrued = described.sumAccrued(FlowDirection.INCOME)
                 .subtract(described.sumAccrued(FlowDirection.EXPENSE))
+                .add(settledNet),
+            received = described.sumReceived(FlowDirection.INCOME)
+                .subtract(described.sumReceived(FlowDirection.EXPENSE))
                 .add(settledNet),
         )
     }
@@ -323,6 +333,11 @@ class LedgerService(
         entity.direction = request.direction
         entity.amount = Money.amount(request.amount)
         entity.period = request.period
+        // Only where it means something. Carrying a payday across from a monthly wage that was
+        // edited into a daily allowance would leave a number nothing reads and no form shows.
+        entity.arrivesOn = request.arrivesOn
+            ?.takeIf { request.period == CashFlowPeriod.WEEKLY || request.period == CashFlowPeriod.MONTHLY }
+            ?.toShort()
         entity.category = request.category?.trim()?.takeIf { it.isNotEmpty() }
         entity.startsOn = startsOn
         entity.endsOn = endsOn
@@ -510,7 +525,8 @@ class LedgerService(
         now: Instant,
         zone: java.time.ZoneId,
     ): CashFlowResponse {
-        val projection = CashFlowEngine.project(amount, period, startsOn, endsOn, month, now, zone)
+        val projection = CashFlowEngine
+            .project(amount, period, startsOn, endsOn, month, now, zone, arrivesOn?.toInt())
         return CashFlowResponse(
             id = id,
             name = name,
@@ -526,8 +542,10 @@ class LedgerService(
             ratePerSecond = Money.rate(projection.ratePerSecond),
             windowStart = projection.window?.start,
             windowEnd = projection.window?.end,
+            arrivesOn = arrivesOn?.toInt(),
             expectedThisMonth = projection.expected,
             accruedThisMonth = projection.accrued,
+            receivedThisMonth = projection.received,
         )
     }
 
@@ -635,13 +653,16 @@ class LedgerService(
         recordedByMonth: Map<YearMonth, BigDecimal>,
         zone: java.time.ZoneId,
     ): BigDecimal {
-        // An instant inside the month, so each rate is divided by that month's own length.
-        val inside = month.start.plusSeconds(1)
+        // A finished month is measured the same way a live one is: by what was paid out in
+        // it. For a month that has fully elapsed the two are usually the same figure, but a
+        // flow that began part-way through it is not owed for the days before it existed.
+        val ended = month.end
         val fromFlows = flows.fold(BigDecimal.ZERO) { sum, flow ->
-            val expected = CashFlowEngine
-                .project(flow.amount, flow.period, flow.startsOn, flow.endsOn, month, inside, zone)
-                .expected
-            if (flow.direction == FlowDirection.INCOME) sum.add(expected) else sum.subtract(expected)
+            val received = CashFlowEngine.receivedOver(
+                flow.amount, flow.period, flow.startsOn, flow.endsOn, month, ended, zone,
+                flow.arrivesOn?.toInt(),
+            )
+            if (flow.direction == FlowDirection.INCOME) sum.add(received) else sum.subtract(received)
         }
         val key = YearMonth.from(LocalDate.ofInstant(month.start, zone))
         return fromFlows.add(recordedByMonth[key] ?: BigDecimal.ZERO)
@@ -697,6 +718,10 @@ class LedgerService(
     private fun List<CashFlowResponse>.sumAccrued(direction: FlowDirection): BigDecimal =
         filter { it.direction == direction }
             .fold(BigDecimal.ZERO) { sum, it -> sum + it.accruedThisMonth }
+
+    private fun List<CashFlowResponse>.sumReceived(direction: FlowDirection): BigDecimal =
+        filter { it.direction == direction }
+            .fold(BigDecimal.ZERO) { sum, it -> sum + it.receivedThisMonth }
 
     private fun List<CashFlowResponse>.sumExpected(direction: FlowDirection): BigDecimal =
         filter { it.direction == direction }

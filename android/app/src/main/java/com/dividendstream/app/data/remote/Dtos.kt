@@ -332,6 +332,8 @@ data class SaveCashFlowRequest(
     /** DAILY, WEEKLY, MONTHLY or YEARLY. */
     val period: String,
     val category: String? = null,
+    /** Which day of its period this pays on. 1-7 for weekly, 1-31 for monthly; else null. */
+    val arrivesOn: Int? = null,
     val startsOn: LocalDate? = null,
     val endsOn: LocalDate? = null,
 )
@@ -372,6 +374,15 @@ data class CashFlowDto(
     val windowEnd: Instant? = null,
     val expectedThisMonth: BigDecimal,
     val accruedThisMonth: BigDecimal,
+    /**
+     * Which day of its period this pays on, or null for the day the period ends.
+     *
+     * A wage paid on the 28th is nothing until the 28th and all of it after -- spreading it
+     * across the month is a picture of a pace, not of what anybody holds.
+     */
+    val arrivesOn: Int? = null,
+    /** What has actually landed: whole periods that have finished. */
+    val receivedThisMonth: BigDecimal = BigDecimal.ZERO,
 )
 
 @Serializable
@@ -500,8 +511,14 @@ data class LedgerDto(
     val keptBeforeThisMonth: BigDecimal = BigDecimal.ZERO,
     /** This month's leftover, whichever period is being shown. */
     val monthNetAccrued: BigDecimal = BigDecimal.ZERO,
-    /** The month's net rate per second. The same figure in either view. */
-    val monthNetRatePerSecond: BigDecimal = BigDecimal.ZERO,
+    /**
+     * The month counting only money that has actually arrived, plus what was written down.
+     *
+     * What the funds hold is built from this rather than from the ticking figure above it. A
+     * wage of RM3,000 is not RM1,000 by the tenth, and a fund holding money nobody has yet is
+     * how a person comes to spend it.
+     */
+    val monthReceivedNet: BigDecimal = BigDecimal.ZERO,
     /** The two above, at `serverTime`. The client re-adds them per frame to keep it moving. */
     val keptSoFar: BigDecimal = BigDecimal.ZERO,
 

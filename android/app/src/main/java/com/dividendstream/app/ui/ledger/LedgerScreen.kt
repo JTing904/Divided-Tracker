@@ -179,7 +179,7 @@ fun LedgerScreen(
                 }
             }
 
-            item { FundTotalCard(state, viewModel.serverClock) }
+            item { FundTotalCard(state) }
 
             if (ledger.isBrowsingPast) {
                 // The funds are a running position, not a thing with historical versions, so
@@ -203,8 +203,6 @@ fun LedgerScreen(
                     FundRow(
                         fund = fund,
                         ledger = ledger,
-                        streams = state.streams,
-                        clock = viewModel.serverClock,
                         onOpen = { onOpenFund(fund.id) },
                     )
                 }
@@ -491,13 +489,24 @@ private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
                     when {
                         negative && state.period == LedgerPeriod.Day -> "Short today"
                         negative -> "Short this month"
-                        state.period == LedgerPeriod.Day -> "Left over today"
-                        else -> "Left over this month"
+                        state.period == LedgerPeriod.Day -> "On track for today"
+                        else -> "On track for this month"
                     },
                 )
                 Spacer(Modifier.height(10.dp))
                 SignedLiveAmountText(amount = net, currency = ledger.currency)
                 Spacer(Modifier.height(12.dp))
+
+                // The figure above is a pace, not a balance: it spreads a wage across the days
+                // of its month because that is what makes it watchable. What has actually been
+                // paid is a different number and belongs beside it, not hidden behind it.
+                Text(
+                    "${ledger.monthReceivedNet.formatMoney(ledger.currency)} of that has " +
+                        "actually arrived. The rest is on its way at the pace below.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
                 Text(
                     ledger.netRatePerSecond.paceSentence(ledger),
                     style = MaterialTheme.typography.bodySmall,
@@ -636,17 +645,13 @@ private fun CashFlowRow(
  * refresh would be the first thing anyone noticed.
  */
 @Composable
-private fun FundTotalCard(state: LedgerUiState, clock: ServerClock) {
+private fun FundTotalCard(state: LedgerUiState) {
     val ledger = state.ledger ?: return
-    val net by rememberMonthNet(
-        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
-    )
-    val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net
-    val total = remember(ledger.funds) { ledger.funds }
-        .fold(BigDecimal.ZERO) { sum, fund ->
-            val share = fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP)
-            sum.add(fund.carriedOver).add(accruing.multiply(share))
-        }
+    // The server's figure, not one rebuilt per frame. A fund holds money that has arrived, and
+    // money arrives in lumps on a date -- so there is nothing here to animate, and animating it
+    // was the whole complaint: a balance that climbs by the second is describing a wage nobody
+    // has been paid yet.
+    val total = ledger.totalFundBalance
     val borrowed = total.signum() < 0
 
     DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
@@ -750,24 +755,17 @@ private fun AllocationBar(ledger: LedgerDto) {
 private fun FundRow(
     fund: FundDto,
     ledger: LedgerDto,
-    streams: LedgerStreams,
-    clock: ServerClock,
     onOpen: () -> Unit,
 ) {
     val badge = LedgerIcon.of(fund.icon)
-    val net by rememberMonthNet(
-        ledger.monthNetAccrued, ledger.monthNetRatePerSecond, ledger.serverTime, clock,
-    )
-    // A fund takes its share of the surplus, and there is no share of a deficit.
-    val share = remember(fund) { fund.percent.divide(BigDecimal("100"), 10, RoundingMode.HALF_UP) }
-    val accruing = if (net.signum() <= 0) BigDecimal.ZERO else net.multiply(share)
-    // The settled part plus this month's share, recomputed each frame. The same sum the
-    // server does, which is what stops the figure jumping when a refresh lands.
-    val holding = fund.carriedOver.add(accruing)
+    // Straight from the server. What a fund holds steps when a payment lands rather than
+    // climbing by the second, so there is nothing to redraw between refreshes.
+    val holding = fund.balance
+    val collected = fund.accruedThisMonth
     val target = fund.plannedThisMonth
     val progress =
         if (target.signum() <= 0) 0f
-        else accruing.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
+        else collected.divide(target, 6, RoundingMode.DOWN).toFloat().coerceIn(0f, 1f)
 
     DsCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -825,8 +823,8 @@ private fun FundRow(
                 holding.signum() < 0 && target.signum() > 0 ->
                     "Paying itself back at ${target.formatMoney(ledger.currency)} a month"
                 target.signum() > 0 ->
-                    "+${accruing.formatAmount(Precision.AMOUNT)} of " +
-                        "${target.formatMoney(ledger.currency)} this month"
+                    "${collected.formatMoney(ledger.currency)} in, of " +
+                        "${target.formatMoney(ledger.currency)} expected this month"
                 else -> "Nothing to put aside this month"
             },
             style = MaterialTheme.typography.bodySmall,

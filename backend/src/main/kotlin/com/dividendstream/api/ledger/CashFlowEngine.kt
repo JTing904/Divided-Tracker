@@ -28,6 +28,16 @@ data class FlowProjection(
     val window: Window?,
     val expected: BigDecimal,
     val accrued: BigDecimal,
+    /**
+     * What has actually arrived: whole periods that have finished, and nothing else.
+     *
+     * [accrued] answers "at this rate, how far through the month are we", which is the right
+     * question for a dividend -- a holding earns by the day whether or not anything has been
+     * paid. It is the wrong question for a wage. RM3,000 a month is not RM1,000 by the tenth;
+     * it is nothing until it lands and then all of it, and a fund filled from [accrued] sets
+     * aside money nobody has yet, which is how a person ends up spending it.
+     */
+    val received: BigDecimal,
 )
 
 /**
@@ -175,6 +185,108 @@ object CashFlowEngine {
     }
 
     /**
+     * What a flow has actually paid out inside [window], at [at].
+     *
+     * Money arrives in lumps on a date, not by the second. A period's amount lands when that
+     * period **finishes**: a daily allowance of RM20 is RM20 once the day is over, and RM0
+     * for the whole of the day you are living through. Whole periods only -- half a week is
+     * not half a payment, it is no payment.
+     *
+     * That is deliberately the cautious end of the choice. A wage paid on the 25th reads as
+     * nothing until the month closes, so this can be *behind* what someone actually holds. It
+     * is never ahead of it, and only one of those two errors gets a person to spend money they
+     * do not have.
+     *
+     * A period counts only if the flow was live for all of it. A daily allowance beginning
+     * halfway through Tuesday does not pay for Tuesday.
+     */
+    fun receivedOver(
+        amount: BigDecimal,
+        period: CashFlowPeriod,
+        startsOn: LocalDate,
+        endsOn: LocalDate?,
+        window: Window,
+        at: Instant,
+        zone: ZoneId,
+        arrivesOn: Int? = null,
+    ): BigDecimal {
+        if (amount.signum() <= 0 || window.isEmpty) return Money.ZERO_AMOUNT
+        // A payment that arrives after now, or after the window closes, has not landed in it.
+        val until = minOf(at, window.end)
+        if (!until.isAfter(window.start)) return Money.ZERO_AMOUNT
+
+        // Start from the period the window opens inside, which may have begun before it: a
+        // week running across a month end pays on a day in the new month.
+        var opens = previousBoundary(LocalDate.ofInstant(window.start, zone), period)
+        var paid = 0L
+        var guard = 0
+        while (guard++ < MAX_BOUNDARIES) {
+            val closes = nextBoundary(opens, period)
+            val lastDay = closes.minusDays(1)
+            val payday = paydayOf(opens, lastDay, period, arrivesOn)
+            val landsAt = payday.atStartOfDay(zone).toInstant()
+
+            if (landsAt.isAfter(until)) break
+            if (landsAt.isAfter(window.start) || landsAt == window.start) {
+                // Live on the day the money lands. A named payday is a fact about a date, so
+                // being employed on it is what matters; without one the payment closes the
+                // period, and the day that earned it is the period's last.
+                val onDay = if (arrivesOn == null) lastDay else payday
+                if (!onDay.isBefore(startsOn) && (endsOn == null || !onDay.isAfter(endsOn))) paid++
+            }
+            opens = closes
+        }
+        return Money.amount(amount.multiply(BigDecimal.valueOf(paid)))
+    }
+
+    /**
+     * The day one period's money arrives on.
+     *
+     * With no named day the money closes the period: it lands at the start of the day after
+     * the last one, which is the same instant the period ends. A named day is taken at its
+     * word and lands at the start of it -- somebody who says they are paid on the 28th has
+     * the money on the 28th, and shading that to the 29th to be safe would be second-guessing
+     * the one person who knows.
+     */
+    private fun paydayOf(
+        opens: LocalDate,
+        lastDay: LocalDate,
+        period: CashFlowPeriod,
+        arrivesOn: Int?,
+    ): LocalDate {
+        if (arrivesOn == null) return lastDay.plusDays(1)
+        return when (period) {
+            CashFlowPeriod.WEEKLY -> {
+                val target = arrivesOn.coerceIn(1, 7)
+                opens.plusDays((target - opens.dayOfWeek.value).toLong().coerceAtLeast(0L))
+            }
+            // February has no 31st, and a wage paid "on the 31st" is paid on the last day.
+            CashFlowPeriod.MONTHLY -> opens.withDayOfMonth(arrivesOn.coerceIn(1, opens.lengthOfMonth()))
+            // A day cannot pay on some other day, and a year's payday would need a date
+            // rather than a number. Both close their period.
+            CashFlowPeriod.DAILY, CashFlowPeriod.YEARLY -> lastDay.plusDays(1)
+        }
+    }
+
+    /** The day the period containing [day] began -- or [day] itself if it begins one. */
+    private fun previousBoundary(day: LocalDate, period: CashFlowPeriod): LocalDate = when (period) {
+        CashFlowPeriod.DAILY -> day
+        CashFlowPeriod.WEEKLY -> day.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        CashFlowPeriod.MONTHLY -> day.withDayOfMonth(1)
+        CashFlowPeriod.YEARLY -> day.withDayOfYear(1)
+    }
+
+    private fun nextBoundary(day: LocalDate, period: CashFlowPeriod): LocalDate = when (period) {
+        CashFlowPeriod.DAILY -> day.plusDays(1)
+        CashFlowPeriod.WEEKLY -> day.plusWeeks(1)
+        CashFlowPeriod.MONTHLY -> day.plusMonths(1)
+        CashFlowPeriod.YEARLY -> day.plusYears(1)
+    }
+
+    /** A month of days, a year of months: no window this engine serves needs more. */
+    private const val MAX_BOUNDARIES = 400
+
+    /**
      * Everything one declared flow contributes to the current month, in one call.
      *
      * Composed here rather than at the call site because the order matters: the expected total
@@ -189,10 +301,13 @@ object CashFlowEngine {
         month: Window,
         at: Instant,
         zone: ZoneId,
+        arrivesOn: Int? = null,
     ): FlowProjection {
         val rate = ratePerSecond(amount, period, at, zone)
         val window = activeWindow(month, startsOn, endsOn, zone)
-            ?: return FlowProjection(rate, null, Money.ZERO_ACCRUAL, Money.ZERO_ACCRUAL)
+            ?: return FlowProjection(
+                rate, null, Money.ZERO_ACCRUAL, Money.ZERO_ACCRUAL, Money.ZERO_AMOUNT,
+            )
 
         val expected = expectedOver(amount, periodSeconds(period, at, zone), window)
         return FlowProjection(
@@ -200,6 +315,7 @@ object CashFlowEngine {
             window = window,
             expected = expected,
             accrued = accruedAt(rate, expected, window, at),
+            received = receivedOver(amount, period, startsOn, endsOn, month, at, zone, arrivesOn),
         )
     }
 

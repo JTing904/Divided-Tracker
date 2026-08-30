@@ -3,6 +3,8 @@ package com.dividendstream.api.ledger
 import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.Digits
+import jakarta.validation.constraints.Max
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
@@ -40,6 +42,18 @@ data class SaveCashFlowRequest(
 
     @field:Size(max = 40, message = "That category name is too long")
     val category: String? = null,
+
+    /**
+     * Which day of its period this pays on. Null means the day the period ends.
+     *
+     * WEEKLY reads it as an ISO day of week, Monday being 1. MONTHLY reads it as a day of the
+     * month, clamped where the month is shorter -- "the 31st" is the last day of February.
+     * DAILY and YEARLY ignore it: a day cannot pay on some other day, and a year would need a
+     * date rather than a number.
+     */
+    @field:Min(value = 1, message = "A payday is between 1 and 31")
+    @field:Max(value = 31, message = "A payday is between 1 and 31")
+    val arrivesOn: Int? = null,
 
     /** Defaults to today on the server, so a client need not send one. */
     val startsOn: LocalDate? = null,
@@ -136,8 +150,18 @@ data class CashFlowResponse(
     val windowStart: Instant?,
     val windowEnd: Instant?,
     /** What this flow amounts to across the part of this month it is live for. */
+    /** Which day of its period this pays on, as sent. Null means the period's last day. */
+    val arrivesOn: Int? = null,
     val expectedThisMonth: BigDecimal,
     val accruedThisMonth: BigDecimal,
+    /**
+     * What has actually landed: whole periods that have finished.
+     *
+     * A daily allowance pays when the day is over; a monthly wage when the month is. This is
+     * what the funds and the kept total are built from, because a fund holding money that has
+     * not arrived is how a person comes to spend it.
+     */
+    val receivedThisMonth: BigDecimal,
 )
 
 data class LedgerEntryResponse(
@@ -311,16 +335,17 @@ data class LedgerResponse(
     val monthNetAccrued: BigDecimal,
 
 
+
     /**
-     * The month's net rate per second, for the funds.
+     * The month's income less outgoings counting only money that has actually arrived, plus
+     * what was written down on or before today.
      *
-     * A fund's share is a share of a month, and the client redraws it every frame from
-     * [monthNetAccrued] plus this multiplied by the time since [serverTime]. Reading the
-     * month's own figures rather than rebuilding them from the flows is what makes the funds
-     * come out the same on the day view as on the month view: the flows arrive windowed to
-     * whichever period is on screen, and on a day they have accrued only a few hours.
+     * The difference between this and [monthNetAccrued] is the whole point. [monthNetAccrued]
+     * answers "at this rate, where are we", which is worth watching and worth nothing to
+     * budget against: a wage of RM3,000 is not RM1,000 by the tenth. The funds are filled from
+     * this instead, and it steps rather than ticks.
      */
-    val monthNetRatePerSecond: BigDecimal,
+    val monthReceivedNet: BigDecimal,
 
     /** [keptBeforeThisMonth] plus [monthNetAccrued], at `serverTime`. */
     val keptSoFar: BigDecimal,

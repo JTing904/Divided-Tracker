@@ -80,6 +80,7 @@ class LedgerRepository(
         amount: BigDecimal,
         period: String,
         category: String?,
+        arrivesOn: Int?,
         startsOn: LocalDate?,
         endsOn: LocalDate?,
     ): AppResult<CashFlowDto> = apiCall(json) {
@@ -91,6 +92,7 @@ class LedgerRepository(
                 amount = amount,
                 period = period,
                 category = category,
+                arrivesOn = arrivesOn,
                 startsOn = startsOn,
                 endsOn = endsOn,
             ),
