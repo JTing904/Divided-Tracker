@@ -49,8 +49,22 @@ class LedgerQueue(
         scope.launch {
             availability.status
                 .filterIsInstance<ServerAvailability.Status.Awake>()
-                .collect { drain() }
+                .collect { revive() }
         }
+    }
+
+    /**
+     * Forgets every refusal and tries again, because the server has just woken.
+     *
+     * A change is only ever set aside because sending it failed in a way that looked
+     * permanent, and the commonest reason for that judgement to be wrong is the state that
+     * has just changed. Something the server genuinely refuses is simply set aside again, one
+     * request later; this fires once per waking, not once per response, because the status is
+     * a StateFlow and only emits when it actually changes.
+     */
+    private suspend fun revive() {
+        store.all().filter { it.isBlocked }.forEach { store.replace(it.unblocked()) }
+        drain()
     }
 
     /**
@@ -178,10 +192,17 @@ class LedgerQueue(
             }
 
             is AppResult.Failure -> {
-                // A retryable failure is the ordinary case -- the server is asleep, or the
-                // device is off the network -- and the change simply stays queued. Anything
-                // else would fail identically forever, so it stops and waits to be seen.
-                if (result.error.isRetryable) {
+                // Only the server refusing the change itself is a reason to stop trying.
+                //
+                // Being asleep is not, and neither is a session that could not be renewed.
+                // Those look different but they are the same event: the token expires while
+                // the phone is idle, the write wakes a sleeping server, the refresh that goes
+                // with it times out too, and a plain 401 comes back. Marked failed, that is
+                // somebody being told the thing they just wrote down was thrown away because
+                // the free tier had gone to sleep -- which is the exact moment this queue
+                // exists for. Held instead: it goes out when the server answers, or when the
+                // person signs in again, and either way nothing they typed is lost.
+                if (result.error.isRetryable || result.error.isAuthFailure) {
                     false
                 } else {
                     store.replace(write.blocked(result.error.message))

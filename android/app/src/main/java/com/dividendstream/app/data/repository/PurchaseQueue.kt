@@ -102,10 +102,11 @@ class PurchaseQueue(
 
             is AppResult.Failure -> {
                 // A retryable failure is the ordinary case -- the server is asleep, or the
-                // phone is off the network -- and the purchase simply stays queued. Anything
-                // else will fail identically forever, so it stops and waits to be seen rather
-                // than retrying silently until the end of time.
-                if (!result.error.isRetryable) {
+                // phone is off the network -- and the purchase simply stays queued. So is a
+                // session that could not be renewed, which is what a sleeping server does to
+                // an expired token. Anything else will fail identically forever, so it stops
+                // and waits to be seen rather than retrying silently until the end of time.
+                if (!result.error.isRetryable && !result.error.isAuthFailure) {
                     store.replace(purchase.copy(failure = result.error.message))
                 }
             }
