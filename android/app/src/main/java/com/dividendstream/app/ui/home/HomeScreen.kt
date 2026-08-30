@@ -117,7 +117,6 @@ fun HomeScreen(
                     snapshot = snapshot,
                     ledger = ledger,
                     dividendStreams = state.streams,
-                    ledgerStreams = state.ledgerStreams,
                     clock = viewModel.serverClock,
                 )
             }
@@ -181,18 +180,24 @@ private fun TotalCard(
     snapshot: LiveDividendDto,
     ledger: LedgerDto?,
     dividendStreams: List<com.dividendstream.app.domain.AccumulationStream>,
-    ledgerStreams: LedgerStreams,
     clock: ServerClock,
 ) {
     val currency = ledger?.currency ?: snapshot.currency
     val dividends by rememberAccruedAmount(dividendStreams, clock)
-    val thisMonth by rememberNetAccrued(ledgerStreams, clock)
 
-    // The settled months plus this one, recomputed here each frame so the total keeps pace
-    // with the ledger screen instead of standing still until the next refresh.
-    val kept = (ledger?.keptBeforeThisMonth ?: BigDecimal.ZERO)
-        .add(thisMonth)
-        .add(ledger?.recordedNet ?: BigDecimal.ZERO)
+    // The same sum the ledger screen shows, field for field. It used to be worked out here a
+    // second way -- the settled months plus this one, ticking -- and the two screens then
+    // disagreed about what a person had, which is the one thing a total must not do.
+    //
+    // Money that has arrived only: what was put into funds by hand, every month that has
+    // finished, and what this month has paid so far. A settled month is counted once, in
+    // keptBeforeThisMonth, and taken back out of the funds' side.
+    val byHand = ledger?.funds.orEmpty().fold(BigDecimal.ZERO) { sum, fund ->
+        sum.add(fund.carriedOver).subtract(fund.earmarkedEarlier)
+    }
+    val kept = byHand
+        .add(ledger?.keptBeforeThisMonth ?: BigDecimal.ZERO)
+        .add(ledger?.monthReceivedNet ?: BigDecimal.ZERO)
     val total = kept.add(dividends)
 
     DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp), border = null) {
@@ -213,7 +218,7 @@ private fun TotalCard(
                 SignedLiveAmountText(amount = total, currency = currency)
                 Spacer(Modifier.height(16.dp))
 
-                Component("Kept", kept.formatAmount(Precision.AMOUNT), "income less what you spent")
+                Component("Kept", kept.formatAmount(Precision.AMOUNT), "money that has arrived")
                 Component(
                     "Dividends",
                     dividends.formatAmount(Precision.AMOUNT),

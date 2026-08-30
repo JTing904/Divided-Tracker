@@ -638,37 +638,78 @@ private fun CashFlowRow(
 // --- funds -------------------------------------------------------------------
 
 /**
- * Everything across the funds, ticking.
+ * What there is, beside what has been set aside.
  *
- * Summed from the same per-frame figures the rows show, not from the server's snapshot, so
- * the total and the rows below it always agree -- a total that lagged its own parts by a
- * refresh would be the first thing anyone noticed.
+ * Two cards rather than one, because they answer two questions and answering only the second
+ * left a person doing the first in their head. The total leads: it is what somebody means by
+ * "how much do I have", and the funds are a note about where part of it is pointed.
+ *
+ * Nothing here ticks. Both figures are the server's, and both count money that has arrived --
+ * a wage is not a third of itself by the tenth, and a total that climbs by the second is
+ * describing money nobody has been paid.
  */
 @Composable
 private fun FundTotalCard(state: LedgerUiState) {
     val ledger = state.ledger ?: return
-    // The server's figure, not one rebuilt per frame. A fund holds money that has arrived, and
-    // money arrives in lumps on a date -- so there is nothing here to animate, and animating it
-    // was the whole complaint: a balance that climbs by the second is describing a wage nobody
-    // has been paid yet.
-    val total = ledger.totalFundBalance
-    val borrowed = total.signum() < 0
 
-    DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp)) {
-        OverlineText(if (borrowed) "Owed back across your funds" else "In your funds")
+    // A settled month is money moved from the leftover into a fund, not money gained -- so it
+    // is counted once, in `keptBeforeThisMonth`, and taken back out of the funds' side here.
+    // Adding both would report every past month twice.
+    val byHand = remember(ledger.funds) {
+        ledger.funds.fold(BigDecimal.ZERO) { sum, fund ->
+            sum.add(fund.carriedOver).subtract(fund.earmarkedEarlier)
+        }
+    }
+    val everything = byHand
+        .add(ledger.keptBeforeThisMonth)
+        .add(ledger.monthReceivedNet)
+    val banked = ledger.totalFundBalance
+
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TotalTile(
+                label = if (everything.signum() < 0) "You are short" else "Everything you have",
+                amount = everything,
+                currency = ledger.currency,
+                tint = if (everything.signum() < 0) DividendColors.Danger else DividendColors.Growth,
+                modifier = Modifier.weight(1f),
+            )
+            TotalTile(
+                label = if (banked.signum() < 0) "Owed back to funds" else "Banked in your funds",
+                amount = banked,
+                currency = ledger.currency,
+                tint = if (banked.signum() < 0) DividendColors.Danger
+                else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+        }
         Spacer(Modifier.height(8.dp))
-        SignedLiveAmountText(
-            amount = total,
-            currency = ledger.currency,
-            decimals = Precision.AMOUNT,
-            steadyDecimals = 2,
-            style = MonoFigure,
-        )
-        Spacer(Modifier.height(6.dp))
         Text(
-            "Across ${ledger.funds.size} " + if (ledger.funds.size == 1) "fund" else "funds",
+            "Money that has actually arrived: what you put into funds, every month that has " +
+                "finished, and what this month has paid so far. What is still on its way is " +
+                "counted above, not here.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun TotalTile(
+    label: String,
+    amount: BigDecimal,
+    currency: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    DsCard(modifier = modifier, contentPadding = PaddingValues(16.dp)) {
+        OverlineText(label)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            (if (amount.signum() < 0) "-" else "") + amount.abs().formatMoney(currency),
+            style = MonoFigure,
+            color = tint,
+            maxLines = 1,
         )
     }
 }
