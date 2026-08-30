@@ -1,6 +1,7 @@
 package com.dividendstream.app
 
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.local.PendingLedgerStore
 import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
 import com.dividendstream.app.data.local.SettingsStore
@@ -11,6 +12,7 @@ import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.LedgerQueue
 import com.dividendstream.app.data.repository.PurchaseQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +56,20 @@ class AppContainer {
     val purchaseQueue = PurchaseQueue(
         store = pendingPurchaseStore,
         portfolioRepository = portfolioRepository,
+        availability = serverAvailability,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
+
+    private val pendingLedgerStore = PendingLedgerStore(network.json)
+
+    /**
+     * Ledger changes live here between being entered and being accepted. Its own scope, like
+     * the purchase queue and for the same reason: writing down a lunch should not tie a person
+     * to the screen they wrote it on.
+     */
+    val ledgerQueue = LedgerQueue(
+        store = pendingLedgerStore,
+        ledgerRepository = ledgerRepository,
         availability = serverAvailability,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )

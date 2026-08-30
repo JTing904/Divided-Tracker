@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.dividendstream"
-version = "1.0.16"
+version = "1.0.17"
 
 kotlin {
     jvmToolchain(21)
@@ -42,6 +42,7 @@ sourceSets {
             // DataStore-backed; replaced by file-backed equivalents.
             "com/dividendstream/app/data/local/SessionStore.kt",
             "com/dividendstream/app/data/local/SnapshotCache.kt",
+            "com/dividendstream/app/data/local/PendingLedgerStore.kt",
             "com/dividendstream/app/data/local/PendingPurchaseStore.kt",
             "com/dividendstream/app/data/local/SettingsStore.kt",
             // Reaches the container through LocalContext.
@@ -108,7 +109,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "Dividend Stream"
-            packageVersion = "1.0.16"
+            packageVersion = "1.0.17"
             description = "Watch your expected dividends accumulate in real time"
             vendor = "Dividend Stream"
 

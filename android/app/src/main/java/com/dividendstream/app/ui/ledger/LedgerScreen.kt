@@ -58,6 +58,7 @@ import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LedgerEntryDto
 import com.dividendstream.app.data.remote.MonthlyLedgerTotalDto
 import com.dividendstream.app.data.remote.toAccumulationStream
+import com.dividendstream.app.domain.PendingLedgerWrite
 import com.dividendstream.app.ui.components.DsCard
 import com.dividendstream.app.ui.components.EmptyState
 import com.dividendstream.app.ui.components.ErrorBanner
@@ -113,6 +114,16 @@ fun LedgerScreen(
                     onStepMonth = viewModel::stepMonth,
                     onBackToNow = { viewModel.browseMonth(null) },
                 )
+            }
+
+            if (state.pending.isNotEmpty()) {
+                item {
+                    PendingCard(
+                        pending = state.pending,
+                        onRetry = viewModel::retryPending,
+                        onDiscard = viewModel::discardPending,
+                    )
+                }
             }
 
             if (state.isStale) {
@@ -456,6 +467,66 @@ private fun String.asMonthLabel(): String =
         YearMonth.parse(this)
             .format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
     }.getOrDefault(this)
+
+/**
+ * Changes written here that the server has not taken yet.
+ *
+ * The server sleeps, so pressing Save no longer waits for it -- which would leave a person
+ * with no sign anything had happened at all. This is that sign. It empties itself the moment
+ * the server answers, and on a server that is already awake it flashes past unnoticed.
+ *
+ * Deliberately not folded into the figures above. A change that turns out to be refused would
+ * otherwise have to be walked back out of a total, and a total that goes backwards is worse
+ * than one that is a minute behind.
+ */
+@Composable
+private fun PendingCard(
+    pending: List<PendingLedgerWrite>,
+    onRetry: (String) -> Unit,
+    onDiscard: (String) -> Unit,
+) {
+    val blocked = pending.filter { it.isBlocked }
+    val waiting = pending.size - blocked.size
+
+    DsCard(modifier = Modifier.fillMaxWidth()) {
+        OverlineText(
+            when {
+                waiting == 0 -> "Not sent"
+                waiting == 1 -> "1 change waiting to send"
+                else -> "$waiting changes waiting to send"
+            },
+        )
+        if (waiting > 0) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Saved on this device. They go out on their own when the server answers, even " +
+                    "if you close the app.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        blocked.forEach { write ->
+            Spacer(Modifier.height(12.dp))
+            Text(
+                write.describe,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                write.failure.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = DividendColors.Danger,
+            )
+            Spacer(Modifier.height(6.dp))
+            Row {
+                AddChip("Try again", MaterialTheme.colorScheme.primary) { onRetry(write.key) }
+                Spacer(Modifier.width(8.dp))
+                AddChip("Drop it", DividendColors.Danger) { onDiscard(write.key) }
+            }
+        }
+    }
+}
 
 @Composable
 private fun NetCounterCard(state: LedgerUiState, clock: ServerClock) {
