@@ -43,6 +43,9 @@ sourceSets {
             "com/dividendstream/app/data/local/SessionStore.kt",
             "com/dividendstream/app/data/local/SnapshotCache.kt",
             "com/dividendstream/app/data/local/PendingLedgerStore.kt",
+        // The Firebase Android SDK does not exist on a desktop JVM. The desktop reaches
+        // the same Firestore over its REST API instead, so these are Android-only.
+        "com/dividendstream/app/data/firestore/**",
             "com/dividendstream/app/data/local/PendingPurchaseStore.kt",
             "com/dividendstream/app/data/local/SettingsStore.kt",
             // Reaches the container through LocalContext.

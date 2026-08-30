@@ -88,6 +88,9 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    // Turns Play Services Tasks into suspend functions, which is how Firestore is
+    // awaited without a callback in the middle of every write.
+    implementation(libs.kotlinx.coroutines.play.services)
 
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services)
