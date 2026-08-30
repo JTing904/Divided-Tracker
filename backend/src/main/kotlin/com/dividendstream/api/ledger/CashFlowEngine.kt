@@ -228,7 +228,19 @@ object CashFlowEngine {
             val landsAt = payday.atStartOfDay(zone).toInstant()
 
             if (landsAt.isAfter(until)) break
-            if (landsAt.isAfter(window.start) || landsAt == window.start) {
+            // The window is half-open, and both ends used to be treated as inside it. A
+            // payment landing exactly on the closing instant was counted by the window it
+            // closes *and* by the one that opens there: a bonus paid on 1 March was counted
+            // by February and again by March, and a wage paid on the 1st was counted twice
+            // every month.
+            //
+            // Where no payday is named the money closes its own period, so landing on the
+            // window's end is what it is supposed to do and the window that ends there is the
+            // right one. A named payday is a date inside a period, so it belongs to whichever
+            // window contains it -- and a window does not contain its own end.
+            val withinEnd =
+                if (arrivesOn == null) !landsAt.isAfter(window.end) else landsAt.isBefore(window.end)
+            if (withinEnd && (landsAt.isAfter(window.start) || landsAt == window.start)) {
                 // Live on the day the money lands. A named payday is a fact about a date, so
                 // being employed on it is what matters; without one the payment closes the
                 // period, and the day that earned it is the period's last.
