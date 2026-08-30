@@ -20,8 +20,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,6 +48,12 @@ import com.dividendstream.app.ui.components.DsTextField
 import com.dividendstream.app.ui.components.OverlineText
 import com.dividendstream.app.ui.theme.DividendColors
 import java.math.BigDecimal
+import java.time.Instant
+import java.time.Month
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 import java.time.LocalDate
 
 /** Which editor is open, and what it is editing. Null when none is. */
@@ -105,37 +115,58 @@ private fun FlowDialog(
     var category by remember {
         mutableStateOf(LedgerIcon.of(existing?.category).takeIf { existing != null } ?: defaultIcon(income))
     }
-    var startsOn by remember { mutableStateOf(existing?.startsOn?.toString() ?: thisMonthStart()) }
-    var payday by remember { mutableStateOf(existing?.arrivesOn?.toString().orEmpty()) }
+    // Today, not the first of the month. A flow entered now has not been running all month,
+    // and dating it as though it had credits days nobody lived: "RM17 a day" entered on the
+    // 30th used to arrive already worth RM510.
+    val today = remember { LocalDate.now() }
+    var startsOn by remember { mutableStateOf(existing?.startsOn ?: today) }
+    var payday by remember { mutableStateOf(existing?.arrivesOn) }
+    var paydayMonth by remember { mutableStateOf(existing?.arrivesMonth) }
+    var pickingStart by remember { mutableStateOf(false) }
+    var askingFrom by remember { mutableStateOf(false) }
 
     val parsedAmount = amount.toAmountOrNull()
-    val parsedStart = startsOn.toDateOrNull()
-    // Only weekly and monthly can name a day: a day cannot pay on some other day, and a year
-    // would need a date rather than a number.
-    val paydayApplies = period == "WEEKLY" || period == "MONTHLY"
-    val paydayMax = if (period == "WEEKLY") 7 else 31
-    val parsedPayday = payday.trim().toIntOrNull()?.takeIf { it in 1..paydayMax }
-    val paydayValid = payday.isBlank() || parsedPayday != null
-    val canSave = name.isNotBlank() && parsedAmount != null && parsedStart != null &&
-        paydayValid && !isSaving
+    // A day cannot pay on some other day. Everything longer can, and a year needs a month to
+    // go with it -- which is the half that was missing, so a bonus every March could only be
+    // entered as one every December.
+    val paydayApplies = period != "DAILY"
+    val canSave = name.isNotBlank() && parsedAmount != null && !isSaving
+
+    // Whether saving this would rewrite months that have already finished. Only an amount or a
+    // period does that; renaming a flow or recolouring it changes no figure anywhere.
+    val figuresChanged = existing != null && (
+        parsedAmount?.compareTo(existing.amount) != 0 || period != existing.period
+        )
+    val alreadyRunning = existing != null &&
+        existing.startsOn.isBefore(today) &&
+        existing.endsOn?.isBefore(today) != true
+
+    fun commit(effectiveFrom: LocalDate?) {
+        viewModel.saveFlow(
+            id = existing?.id,
+            name = name.trim(),
+            direction = editor.direction,
+            amount = parsedAmount!!,
+            period = period,
+            category = category.key,
+            arrivesOn = payday.takeIf { paydayApplies },
+            arrivesMonth = paydayMonth.takeIf { period == "YEARLY" },
+            startsOn = startsOn,
+            endsOn = existing?.endsOn,
+            effectiveFrom = effectiveFrom,
+            onSaved = onDismiss,
+        )
+    }
 
     EditorScaffold(
         title = if (existing != null) "Edit ${existing.name}" else if (income) "Money coming in" else "Money going out",
         confirmLabel = if (isSaving) "Saving…" else "Save",
         canConfirm = canSave,
         onConfirm = {
-            viewModel.saveFlow(
-                id = existing?.id,
-                name = name.trim(),
-                direction = editor.direction,
-                amount = parsedAmount!!,
-                period = period,
-                category = category.key,
-                arrivesOn = parsedPayday.takeIf { paydayApplies },
-                startsOn = parsedStart,
-                endsOn = existing?.endsOn,
-                onSaved = onDismiss,
-            )
+            // Changing what a running flow is worth is a raise far more often than it is a
+            // correction, and the two want opposite things from the past. Only the person
+            // knows which, so they are asked -- but only when it actually matters.
+            if (figuresChanged && alreadyRunning) askingFrom = true else commit(null)
         },
         onDismiss = onDismiss,
     ) {
@@ -178,35 +209,237 @@ private fun FlowDialog(
 
         if (paydayApplies) {
             // A wage is nothing until it lands and all of it after, so the day it lands on is
-            // the difference between a fund holding money and a fund pretending to. Blank is
-            // allowed and means the end of the period, which is what every flow did before
-            // this field existed.
-            DsTextField(
-                label = if (period == "WEEKLY") "Paid on (1 = Monday)" else "Paid on (day of month)",
-                value = payday,
-                onValueChange = { payday = it },
-                placeholder = if (period == "WEEKLY") "5" else "28",
-                keyboardType = KeyboardType.Number,
-                isError = !paydayValid,
-                supportingText = when {
-                    !paydayValid -> "A number from 1 to $paydayMax"
-                    period == "WEEKLY" -> "Leave blank and it counts at the end of the week."
-                    else -> "Leave blank and it counts at the end of the month. 31 means the " +
-                        "last day, whatever that is."
+            // the difference between a fund holding money and a fund pretending to.
+            //
+            // Picked, not typed. It was a number box reading "Paid on (1 = Monday)", which asks
+            // somebody to hold a mapping in their head to answer a question about Friday.
+            OverlineText("Paid on")
+            Spacer(Modifier.height(8.dp))
+            when (period) {
+                "WEEKLY" -> ChoiceRow(
+                    options = WEEKDAYS,
+                    selected = payday,
+                    label = { it.second },
+                    key = { it.first },
+                    onSelect = { payday = it.first },
+                )
+
+                "MONTHLY" -> ChoiceRow(
+                    options = MONTH_DAYS,
+                    selected = payday,
+                    label = { it.second },
+                    key = { it.first },
+                    onSelect = { payday = it.first },
+                )
+
+                else -> {
+                    // A year is the only period that needs both halves of a date.
+                    ChoiceRow(
+                        options = MONTHS,
+                        selected = paydayMonth,
+                        label = { it.second },
+                        key = { it.first },
+                        onSelect = { paydayMonth = it.first; if (it.first != null && payday == null) payday = 1 },
+                    )
+                    if (paydayMonth != null) {
+                        Spacer(Modifier.height(8.dp))
+                        ChoiceRow(
+                            options = MONTH_DAYS.filter { it.first != null },
+                            selected = payday,
+                            label = { it.second },
+                            key = { it.first },
+                            onSelect = { payday = it.first },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                when {
+                    period == "YEARLY" && paydayMonth == null ->
+                        "Not set, so it counts when the year ends."
+                    payday == null -> "Not set, so it counts when the period ends."
+                    payday == LAST_DAY -> "The last day of the month, whatever that is."
+                    else -> "It arrives on this day, and is worth nothing before it."
                 },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
-        DsTextField(
-            label = "Running since",
-            value = startsOn,
-            onValueChange = { startsOn = it },
-            placeholder = "YYYY-MM-DD",
-            imeAction = ImeAction.Done,
-            isError = startsOn.isNotBlank() && parsedStart == null,
-            supportingText = "Defaults to the 1st of this month. Change it if it really began later.",
+        // Kept apart from everything above, because it is a different kind of question: the
+        // rows above say how often this repeats, and this one says since when.
+        OverlineText("Running since")
+        Spacer(Modifier.height(8.dp))
+        DateRow(value = startsOn, onClick = { pickingStart = true })
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (startsOn == today) {
+                "Starts today. Nothing is counted for the days before it."
+            } else {
+                "Change it only if it really began then -- days before today are counted in full."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+
+    if (pickingStart) {
+        DatePickerSheet(
+            initial = startsOn,
+            onPicked = { startsOn = it; pickingStart = false },
+            onDismiss = { pickingStart = false },
+        )
+    }
+
+    if (askingFrom) {
+        EffectiveFromDialog(
+            name = existing?.name.orEmpty(),
+            today = today,
+            onFrom = { askingFrom = false; commit(it) },
+            onAlways = { askingFrom = false; commit(null) },
+            onDismiss = { askingFrom = false },
+        )
+    }
+}
+
+/**
+ * Asks whether a change to a running flow should reach the months it has already run.
+ *
+ * A raise and a typo look identical to the app and want opposite things: a raise must leave
+ * March alone, a mistyped number must fix it. Guessing either way silently is how a person
+ * finds a figure they never earned sitting in a month that has already been settled.
+ */
+@Composable
+private fun EffectiveFromDialog(
+    name: String,
+    today: LocalDate,
+    onFrom: (LocalDate) -> Unit,
+    onAlways: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var picking by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                "From when?",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    "$name has been running for a while. Months that have already finished can " +
+                        "keep what they were, or be worked out again with the new figure.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                ChoiceOption(
+                    title = "From today",
+                    detail = "Everything up to yesterday stays as it was",
+                    onClick = { onFrom(today) },
+                )
+                Spacer(Modifier.height(8.dp))
+                ChoiceOption(
+                    title = "From another day",
+                    detail = "It changed earlier and you are catching up",
+                    onClick = { picking = true },
+                )
+                Spacer(Modifier.height(8.dp))
+                ChoiceOption(
+                    title = "It was always this",
+                    detail = "The old figure was wrong -- correct every month",
+                    onClick = onAlways,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+    )
+
+    if (picking) {
+        DatePickerSheet(
+            initial = today,
+            onPicked = { picking = false; onFrom(it) },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+@Composable
+private fun ChoiceOption(title: String, detail: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The chosen date, as a button. Typing `2026-08-30` into a phone is nobody's idea of a date. */
+@Composable
+private fun DateRow(value: LocalDate, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            value.format(DAY_FORMAT),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        OverlineText("Change", color = MaterialTheme.colorScheme.primary, maxLines = 1, softWrap = false)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerSheet(initial: LocalDate, onPicked: (LocalDate) -> Unit, onDismiss: () -> Unit) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Read back in UTC, the same zone it was written in. Reading a date the
+                    // picker stores at midnight UTC as a local instant lands on the day before
+                    // for anybody west of Greenwich.
+                    state.selectedDateMillis?.let {
+                        onPicked(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate())
+                    }
+                },
+            ) { Text("Choose", color = MaterialTheme.colorScheme.primary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+    ) {
+        DatePicker(state = state)
     }
 }
 
@@ -598,7 +831,9 @@ private fun <T> ChoiceRow(
     options: List<T>,
     selected: Any?,
     label: (T) -> String,
-    key: (T) -> Any,
+    // Nullable: "not set" is a real choice on every one of these rows, and it is the one that
+    // means what the app did before paydays existed -- count at the end of the period.
+    key: (T) -> Any?,
     onSelect: (T) -> Unit,
 ) {
     Row(
@@ -622,6 +857,8 @@ private fun <T> ChoiceRow(
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isSelected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -635,9 +872,26 @@ private val PERIODS = listOf(
     "YEARLY" to "A year",
 )
 
-private fun defaultIcon(income: Boolean) = if (income) LedgerIcon.Salary else LedgerIcon.Food
+/** 31 is read by the engine as "the last day of this month, whatever that is". */
+private const val LAST_DAY = 31
 
-private fun thisMonthStart(): String = LocalDate.now().withDayOfMonth(1).toString()
+private val WEEKDAYS: List<Pair<Int?, String>> = listOf(
+    null to "Week end",
+    1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat", 7 to "Sun",
+)
+
+private val MONTH_DAYS: List<Pair<Int?, String>> =
+    listOf<Pair<Int?, String>>(null to "Month end") +
+        (1..30).map { it as Int? to it.toString() } +
+        listOf(LAST_DAY as Int? to "Last day")
+
+private val MONTHS: List<Pair<Int?, String>> =
+    listOf<Pair<Int?, String>>(null to "Year end") +
+        (1..12).map { it as Int? to Month.of(it).getDisplayName(TextStyle.SHORT, Locale.US) }
+
+private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.US)
+
+private fun defaultIcon(income: Boolean) = if (income) LedgerIcon.Salary else LedgerIcon.Food
 
 /** Rejects anything that is not a positive number, so an empty field is never sent as zero. */
 private fun String.toAmountOrNull(): BigDecimal? =

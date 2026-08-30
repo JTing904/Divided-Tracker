@@ -130,8 +130,11 @@ class LedgerQueue(
                 period = write.period,
                 category = write.category,
                 arrivesOn = write.arrivesOn,
+                arrivesMonth = write.arrivesMonth,
                 startsOn = write.startsOn,
                 endsOn = write.endsOn,
+                effectiveFrom = write.effectiveFrom,
+                successorId = write.successorId,
             )
 
             is PendingLedgerWrite.Entry -> ledgerRepository.saveEntry(

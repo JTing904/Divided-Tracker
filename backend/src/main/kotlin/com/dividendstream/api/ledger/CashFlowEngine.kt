@@ -209,6 +209,7 @@ object CashFlowEngine {
         at: Instant,
         zone: ZoneId,
         arrivesOn: Int? = null,
+        arrivesMonth: Int? = null,
     ): BigDecimal {
         if (amount.signum() <= 0 || window.isEmpty) return Money.ZERO_AMOUNT
         // A payment that arrives after now, or after the window closes, has not landed in it.
@@ -223,7 +224,7 @@ object CashFlowEngine {
         while (guard++ < MAX_BOUNDARIES) {
             val closes = nextBoundary(opens, period)
             val lastDay = closes.minusDays(1)
-            val payday = paydayOf(opens, lastDay, period, arrivesOn)
+            val payday = paydayOf(opens, lastDay, period, arrivesOn, arrivesMonth)
             val landsAt = payday.atStartOfDay(zone).toInstant()
 
             if (landsAt.isAfter(until)) break
@@ -253,6 +254,7 @@ object CashFlowEngine {
         lastDay: LocalDate,
         period: CashFlowPeriod,
         arrivesOn: Int?,
+        arrivesMonth: Int?,
     ): LocalDate {
         if (arrivesOn == null) return lastDay.plusDays(1)
         return when (period) {
@@ -262,9 +264,15 @@ object CashFlowEngine {
             }
             // February has no 31st, and a wage paid "on the 31st" is paid on the last day.
             CashFlowPeriod.MONTHLY -> opens.withDayOfMonth(arrivesOn.coerceIn(1, opens.lengthOfMonth()))
-            // A day cannot pay on some other day, and a year's payday would need a date
-            // rather than a number. Both close their period.
-            CashFlowPeriod.DAILY, CashFlowPeriod.YEARLY -> lastDay.plusDays(1)
+            // A year needs both halves of a date. Given only a day there is no month to put it
+            // in, so it falls back to closing the period rather than guessing January.
+            CashFlowPeriod.YEARLY -> {
+                if (arrivesMonth == null) return lastDay.plusDays(1)
+                val inMonth = opens.withMonth(arrivesMonth.coerceIn(1, 12))
+                inMonth.withDayOfMonth(arrivesOn.coerceIn(1, inMonth.lengthOfMonth()))
+            }
+            // A day cannot pay on some other day.
+            CashFlowPeriod.DAILY -> lastDay.plusDays(1)
         }
     }
 
@@ -302,6 +310,7 @@ object CashFlowEngine {
         at: Instant,
         zone: ZoneId,
         arrivesOn: Int? = null,
+        arrivesMonth: Int? = null,
     ): FlowProjection {
         val rate = ratePerSecond(amount, period, at, zone)
         val window = activeWindow(month, startsOn, endsOn, zone)
@@ -315,7 +324,9 @@ object CashFlowEngine {
             window = window,
             expected = expected,
             accrued = accruedAt(rate, expected, window, at),
-            received = receivedOver(amount, period, startsOn, endsOn, month, at, zone, arrivesOn),
+            received = receivedOver(
+                amount, period, startsOn, endsOn, month, at, zone, arrivesOn, arrivesMonth,
+            ),
         )
     }
 

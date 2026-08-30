@@ -81,8 +81,11 @@ class LedgerRepository(
         period: String,
         category: String?,
         arrivesOn: Int?,
+        arrivesMonth: Int?,
         startsOn: LocalDate?,
         endsOn: LocalDate?,
+        effectiveFrom: LocalDate?,
+        successorId: String?,
     ): AppResult<CashFlowDto> = apiCall(json) {
         api.saveCashFlow(
             SaveCashFlowRequest(
@@ -93,8 +96,11 @@ class LedgerRepository(
                 period = period,
                 category = category,
                 arrivesOn = arrivesOn,
+                arrivesMonth = arrivesMonth,
                 startsOn = startsOn,
                 endsOn = endsOn,
+                effectiveFrom = effectiveFrom,
+                successorId = successorId,
             ),
         )
     }

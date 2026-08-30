@@ -60,6 +60,17 @@ sealed interface PendingLedgerWrite {
         val period: String,
         val category: String?,
         val arrivesOn: Int?,
+        val arrivesMonth: Int? = null,
+        /** Set when this change must not reach the past. See SaveCashFlowRequest. */
+        val effectiveFrom: LocalDate? = null,
+        /**
+         * The id for the flow a split creates.
+         *
+         * Chosen when the change is queued rather than when it is sent, which is what makes a
+         * retry safe: the same pair of ids goes out every time, so a second send finds the
+         * split already done instead of splitting again.
+         */
+        val successorId: String? = null,
         val startsOn: LocalDate?,
         val endsOn: LocalDate?,
         override val queuedAt: Instant,

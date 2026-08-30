@@ -48,18 +48,46 @@ data class SaveCashFlowRequest(
      *
      * WEEKLY reads it as an ISO day of week, Monday being 1. MONTHLY reads it as a day of the
      * month, clamped where the month is shorter -- "the 31st" is the last day of February.
-     * DAILY and YEARLY ignore it: a day cannot pay on some other day, and a year would need a
-     * date rather than a number.
+     * YEARLY reads it with [arrivesMonth], the two together being the date a year needs.
+     * DAILY ignores it: a day cannot pay on some other day.
      */
     @field:Min(value = 1, message = "A payday is between 1 and 31")
     @field:Max(value = 31, message = "A payday is between 1 and 31")
     val arrivesOn: Int? = null,
+
+    /** Which month a YEARLY flow pays in. Ignored by every shorter period. */
+    @field:Min(value = 1, message = "A month is between 1 and 12")
+    @field:Max(value = 12, message = "A month is between 1 and 12")
+    val arrivesMonth: Int? = null,
 
     /** Defaults to today on the server, so a client need not send one. */
     val startsOn: LocalDate? = null,
 
     /** Inclusive. Null means it is still running. */
     val endsOn: LocalDate? = null,
+
+    /**
+     * The day these new figures start applying, when they should not apply to the past.
+     *
+     * A raise is not a correction. Editing the amount in place makes every finished month
+     * recompute at the new figure, which quietly rewrites what a person earned in March. Given
+     * this day, the flow is closed the evening before it and a second one carries the new
+     * figures forward from it, so each month is answered by whichever was true at the time.
+     *
+     * Null means the edit really is a correction -- a number typed wrong -- and the old figures
+     * were never right to begin with.
+     */
+    val effectiveFrom: LocalDate? = null,
+
+    /**
+     * The id the split's second flow is created with, chosen by the client.
+     *
+     * Required for [effectiveFrom], and required to be the client's own choice rather than the
+     * server's: every write may be sent twice by the offline queue, and a server-generated id
+     * would make the second send split an already-split flow into a third. Given the id, the
+     * retry finds it already there and does nothing.
+     */
+    val successorId: UUID? = null,
 )
 
 data class SaveLedgerEntryRequest(
@@ -152,6 +180,8 @@ data class CashFlowResponse(
     /** What this flow amounts to across the part of this month it is live for. */
     /** Which day of its period this pays on, as sent. Null means the period's last day. */
     val arrivesOn: Int? = null,
+    /** Which month a yearly flow pays in, as sent. Null for every shorter period. */
+    val arrivesMonth: Int? = null,
     val expectedThisMonth: BigDecimal,
     val accruedThisMonth: BigDecimal,
     /**

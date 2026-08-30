@@ -51,10 +51,20 @@ class CashFlowEntity(
      * Which day of its period this pays on. Null means the day the period ends.
      *
      * WEEKLY reads it as an ISO day of week (Monday is 1); MONTHLY as a day of the month,
-     * clamped where the month is shorter. DAILY and YEARLY ignore it.
+     * clamped where the month is shorter. YEARLY reads it together with [arrivesMonth].
+     * DAILY ignores it: a day cannot pay on some other day.
      */
     @Column(name = "arrives_on")
     var arrivesOn: Short? = null,
+
+    /**
+     * Which month of the year a YEARLY flow pays in, with [arrivesOn] as the day within it.
+     *
+     * Only a year needs this. Every shorter period is contained by a month and names its own
+     * day, so a month would tell them nothing they do not already know.
+     */
+    @Column(name = "arrives_month")
+    var arrivesMonth: Short? = null,
 
     @Column(name = "currency", nullable = false, length = 3)
     var currency: String = "MYR",

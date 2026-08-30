@@ -28,11 +28,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +77,7 @@ import com.dividendstream.app.ui.theme.DividendColors
 import com.dividendstream.app.ui.theme.MonoFigure
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -96,6 +99,7 @@ fun LedgerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ledger = state.ledger
     var editor by remember { mutableStateOf<LedgerEditor?>(null) }
+    var removing by remember { mutableStateOf<CashFlowDto?>(null) }
 
     when {
         state.isLoading && ledger == null -> LoadingBox(modifier.fillMaxSize())
@@ -181,7 +185,7 @@ fun LedgerScreen(
                         period = state.period,
                         clock = viewModel.serverClock,
                         onEdit = { editor = LedgerEditor.Flow(flow.direction, flow) },
-                        onDelete = { viewModel.deleteFlow(flow.id) },
+                        onDelete = { removing = flow },
                     )
                 }
             }
@@ -314,6 +318,81 @@ fun LedgerScreen(
             isSaving = state.isSaving,
             onDismiss = { editor = null },
         )
+    }
+
+    removing?.let { flow ->
+        RemoveFlowDialog(
+            flow = flow,
+            onStop = { viewModel.stopFlow(flow, LocalDate.now().minusDays(1)); removing = null },
+            onDelete = { viewModel.deleteFlow(flow.id, flow.name); removing = null },
+            onDismiss = { removing = null },
+        )
+    }
+}
+
+/**
+ * Asks whether a flow should stop or be erased.
+ *
+ * Pressing the bin used to do the second, silently. A recurring flow is not a note: deleting
+ * the row takes it out of every month it ever ran in, so dropping an interest of RM0.29 a day
+ * because the account closed also takes back every ringgit it ever paid. Stopping is what
+ * somebody means nearly every time, so it goes first and is the safe one.
+ */
+@Composable
+private fun RemoveFlowDialog(
+    flow: CashFlowDto,
+    onStop: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                flow.name,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        text = {
+            Column {
+                RemoveOption(
+                    title = "Stop it",
+                    detail = "It ran until yesterday, and everything it earned is kept",
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = onStop,
+                )
+                Spacer(Modifier.height(8.dp))
+                RemoveOption(
+                    title = "Delete it",
+                    detail = "As if it never existed -- every month it ran in loses it too",
+                    tint = DividendColors.Danger,
+                    onClick = onDelete,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+    )
+}
+
+@Composable
+private fun RemoveOption(title: String, detail: String, tint: Color, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = tint)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

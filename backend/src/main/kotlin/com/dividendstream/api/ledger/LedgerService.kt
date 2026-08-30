@@ -392,13 +392,17 @@ class LedgerService(
     fun saveFlow(userId: UUID, request: SaveCashFlowRequest): CashFlowResponse {
         val zone = properties.zoneId
         val today = LocalDate.now(clock.withZone(zone))
-        // Defaults to the first of this month, not to today.
+        // Defaults to today.
         //
-        // Someone entering "RM3,000 a month" on the 29th is describing a salary they have been
-        // earning all month, not one starting this afternoon -- and dating it today would show
-        // them RM290 for August and quietly understate what they have. The field is on the
-        // form, so a person who genuinely started mid-month can say so.
-        val startsOn = request.startsOn ?: today.withDayOfMonth(1)
+        // It defaulted to the first of this month, on the reasoning that somebody entering
+        // "RM3,000 a month" on the 29th means a salary they have been earning all month. That
+        // holds for a wage and is badly wrong for everything else: entering "RM17 a day" on
+        // the 30th credited thirty days nobody had lived, RM510 of money invented by a default.
+        //
+        // Money this app has not watched arrive is money it should not claim, which is the
+        // rule the funds and the counter already follow. The field is on the form, so a person
+        // whose salary really did start in March can say March.
+        val startsOn = request.startsOn ?: today
         val endsOn = request.endsOn
         if (endsOn != null && endsOn.isBefore(startsOn)) {
             throw InvalidRequestException("The end date cannot be before the start date.")
@@ -410,28 +414,66 @@ class LedgerService(
             }
         }
 
+        val now = Instant.now(clock)
+        val month = CashFlowEngine.monthWindow(now, zone)
+
+        // A change that is not meant to reach the past closes the old flow and starts a new
+        // one the next day, so every finished month is still answered by what was true in it.
+        val successor = request.successorId
+        val from = request.effectiveFrom
+        if (existing != null && from != null && successor != null && existing.livesOn(from) &&
+            existing.startsOn.isBefore(from)
+        ) {
+            // Already split by an earlier send of this same request. The queue retries, and a
+            // retry that split again would leave the person with three flows and two raises.
+            cashFlowRepository.findById(successor).orElse(null)?.let {
+                if (it.userId != userId) throw NotFoundException("That entry was not found.")
+                return it.describe(month, now, zone)
+            }
+            existing.endsOn = from.minusDays(1)
+            cashFlowRepository.save(existing)
+
+            val started = CashFlowEntity(
+                id = successor,
+                userId = userId,
+                currency = existing.currency,
+            ).apply { request.applyTo(this, startsOn = from, endsOn = endsOn) }
+            return cashFlowRepository.save(started).describe(month, now, zone)
+        }
+
         val entity = existing ?: CashFlowEntity(
             id = request.id ?: UUID.randomUUID(),
             userId = userId,
             currency = userRepository.findById(userId).map { it.baseCurrency }.orElse(DEFAULT_CURRENCY),
         )
+        request.applyTo(entity, startsOn = startsOn, endsOn = endsOn)
+        return cashFlowRepository.save(entity).describe(month, now, zone)
+    }
 
-        entity.name = request.name.trim()
-        entity.direction = request.direction
-        entity.amount = Money.amount(request.amount)
-        entity.period = request.period
+    /** True when this flow is running on [day] -- begun by then, and not yet ended. */
+    private fun CashFlowEntity.livesOn(day: LocalDate): Boolean =
+        !startsOn.isAfter(day) && endsOn?.isBefore(day) != true
+
+    private fun SaveCashFlowRequest.applyTo(
+        entity: CashFlowEntity,
+        startsOn: LocalDate,
+        endsOn: LocalDate?,
+    ) {
+        entity.name = name.trim()
+        entity.direction = direction
+        entity.amount = Money.amount(amount)
+        entity.period = period
         // Only where it means something. Carrying a payday across from a monthly wage that was
         // edited into a daily allowance would leave a number nothing reads and no form shows.
-        entity.arrivesOn = request.arrivesOn
-            ?.takeIf { request.period == CashFlowPeriod.WEEKLY || request.period == CashFlowPeriod.MONTHLY }
+        entity.arrivesOn = arrivesOn
+            ?.takeIf { period != CashFlowPeriod.DAILY }
             ?.toShort()
-        entity.category = request.category?.trim()?.takeIf { it.isNotEmpty() }
+        entity.arrivesMonth = arrivesMonth
+            ?.takeIf { period == CashFlowPeriod.YEARLY }
+            ?.toShort()
+        entity.category = category?.trim()?.takeIf { it.isNotEmpty() }
         entity.startsOn = startsOn
         entity.endsOn = endsOn
-
-        val saved = cashFlowRepository.save(entity)
-        val now = Instant.now(clock)
-        return saved.describe(CashFlowEngine.monthWindow(now, zone), now, zone)
     }
 
     @Transactional
@@ -612,8 +654,10 @@ class LedgerService(
         now: Instant,
         zone: java.time.ZoneId,
     ): CashFlowResponse {
-        val projection = CashFlowEngine
-            .project(amount, period, startsOn, endsOn, month, now, zone, arrivesOn?.toInt())
+        val projection = CashFlowEngine.project(
+            amount, period, startsOn, endsOn, month, now, zone,
+            arrivesOn?.toInt(), arrivesMonth?.toInt(),
+        )
         return CashFlowResponse(
             id = id,
             name = name,
@@ -630,6 +674,7 @@ class LedgerService(
             windowStart = projection.window?.start,
             windowEnd = projection.window?.end,
             arrivesOn = arrivesOn?.toInt(),
+            arrivesMonth = arrivesMonth?.toInt(),
             expectedThisMonth = projection.expected,
             accruedThisMonth = projection.accrued,
             receivedThisMonth = projection.received,
@@ -713,7 +758,7 @@ class LedgerService(
         val fromFlows = flows.fold(BigDecimal.ZERO) { sum, flow ->
             val received = CashFlowEngine.receivedOver(
                 flow.amount, flow.period, flow.startsOn, flow.endsOn, month, ended, zone,
-                flow.arrivesOn?.toInt(),
+                flow.arrivesOn?.toInt(), flow.arrivesMonth?.toInt(),
             )
             if (flow.direction == FlowDirection.INCOME) sum.add(received) else sum.subtract(received)
         }

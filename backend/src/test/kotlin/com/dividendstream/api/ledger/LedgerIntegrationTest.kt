@@ -3,6 +3,7 @@ package com.dividendstream.api.ledger
 import com.dividendstream.api.support.IntegrationTest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.DisplayName
@@ -819,6 +820,179 @@ class LedgerIntegrationTest {
         ).andExpect(status().isNotFound)
     }
 
+    // --- a flow's history is not rewritten by what it becomes later -----------
+
+    @Test
+    @DisplayName("a flow entered today starts today, and does not credit the days before it")
+    fun `a new flow starts today by default`() {
+        val token = register("today@example.com")
+
+        // Deliberately not through saveFlow: this is about what the server does with no date.
+        postFlow(token, """{"name":"Allowance","direction":"INCOME","amount":"17.00","period":"DAILY"}""")
+
+        val flow = ledger(token)["flows"][0]
+        assertThat(LocalDate.parse(flow["startsOn"].asText())).isEqualTo(LocalDate.now())
+
+        // Only the days that are left, not the whole month. Dating it to the 1st credited
+        // every day since, which on the 30th is RM510 of money the person never had.
+        val today = LocalDate.now()
+        val daysLeft = today.lengthOfMonth() - today.dayOfMonth + 1
+        assertThat(ledger(token)["plannedIncome"].money())
+            .isEqualByComparingTo(BigDecimal.valueOf(17L * daysLeft))
+    }
+
+    @Test
+    @DisplayName("a raise applies from the day it happened, leaving finished months alone")
+    fun `an effective-dated edit splits the flow instead of rewriting it`() {
+        val token = register("raise@example.com")
+        val lastMonth = YearMonth.now().minusMonths(1)
+
+        val id = objectMapper.readTree(
+            saveFlow(
+                token,
+                """{"name":"Allowance","direction":"INCOME","amount":"10.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}"}""",
+            ),
+        )["id"].asText()
+
+        val before = ledger(token, month = lastMonth.toString())["plannedIncome"].money()
+        assertThat(before).isEqualByComparingTo(BigDecimal.valueOf(10L * lastMonth.lengthOfMonth()))
+
+        val today = LocalDate.now()
+        val successor = UUID.randomUUID().toString()
+        postFlow(
+            token,
+            """{"id":"$id","successorId":"$successor","effectiveFrom":"$today","name":"Allowance","direction":"INCOME","amount":"17.00","period":"DAILY"}""",
+        )
+
+        // Two flows now, the first closed the evening before the raise.
+        val flows = ledger(token)["flows"].associateBy { it["id"].asText() }
+        assertThat(flows).hasSize(2)
+        assertThat(LocalDate.parse(flows.getValue(id)["endsOn"].asText())).isEqualTo(today.minusDays(1))
+        assertThat(flows.getValue(successor)["amount"].money()).isEqualByComparingTo(BigDecimal("17.00"))
+        assertThat(LocalDate.parse(flows.getValue(successor)["startsOn"].asText())).isEqualTo(today)
+
+        // The whole point: last month still answers with what was true last month.
+        assertThat(ledger(token, month = lastMonth.toString())["plannedIncome"].money())
+            .isEqualByComparingTo(before)
+    }
+
+    @Test
+    @DisplayName("the offline queue may send a raise twice, and twice must not mean two raises")
+    fun `splitting is idempotent on the successor id`() {
+        val token = register("twice@example.com")
+        val lastMonth = YearMonth.now().minusMonths(1)
+
+        val id = objectMapper.readTree(
+            saveFlow(
+                token,
+                """{"name":"Allowance","direction":"INCOME","amount":"10.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}"}""",
+            ),
+        )["id"].asText()
+
+        val successor = UUID.randomUUID().toString()
+        val body =
+            """{"id":"$id","successorId":"$successor","effectiveFrom":"${LocalDate.now()}","name":"Allowance","direction":"INCOME","amount":"17.00","period":"DAILY"}"""
+        postFlow(token, body)
+        postFlow(token, body)
+
+        assertThat(ledger(token)["flows"]).hasSize(2)
+    }
+
+    @Test
+    @DisplayName("an edit with no effective date is a correction, and corrections do reach the past")
+    fun `an edit without an effective date still rewrites`() {
+        val token = register("typo@example.com")
+        val lastMonth = YearMonth.now().minusMonths(1)
+
+        val id = objectMapper.readTree(
+            saveFlow(
+                token,
+                """{"name":"Allowance","direction":"INCOME","amount":"1.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}"}""",
+            ),
+        )["id"].asText()
+
+        // A number typed wrong was never right, so putting it right must reach every month it
+        // was wrong in. This is the other half of the choice the app puts to the person.
+        postFlow(
+            token,
+            """{"id":"$id","name":"Allowance","direction":"INCOME","amount":"10.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}"}""",
+        )
+
+        assertThat(ledger(token)["flows"]).hasSize(1)
+        assertThat(ledger(token, month = lastMonth.toString())["plannedIncome"].money())
+            .isEqualByComparingTo(BigDecimal.valueOf(10L * lastMonth.lengthOfMonth()))
+    }
+
+    @Test
+    @DisplayName("stopping a flow keeps what it already earned; deleting it does not")
+    fun `an end date preserves history where deleting erases it`() {
+        val token = register("stop@example.com")
+        val lastMonth = YearMonth.now().minusMonths(1)
+
+        val id = objectMapper.readTree(
+            saveFlow(
+                token,
+                """{"name":"Interest","direction":"INCOME","amount":"1.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}"}""",
+            ),
+        )["id"].asText()
+        val earned = BigDecimal.valueOf(lastMonth.lengthOfMonth().toLong())
+
+        // Stopped yesterday: last month is untouched, because it really did earn it.
+        postFlow(
+            token,
+            """{"id":"$id","name":"Interest","direction":"INCOME","amount":"1.00","period":"DAILY","startsOn":"${lastMonth.atDay(1)}","endsOn":"${LocalDate.now().minusDays(1)}"}""",
+        )
+        assertThat(ledger(token, month = lastMonth.toString())["plannedIncome"].money())
+            .isEqualByComparingTo(earned)
+
+        // Deleted outright: gone from every month it ever ran in. Kept as the escape hatch for
+        // something entered by mistake, which is why the app asks before doing it.
+        mockMvc.perform(
+            delete("/api/ledger/flows/$id").header(HttpHeaders.AUTHORIZATION, "Bearer $token"),
+        ).andExpect(status().isNoContent)
+
+        assertThat(ledger(token, month = lastMonth.toString())["plannedIncome"].money())
+            .isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    @DisplayName("a yearly bonus arrives on its own date, not on the 31st of December")
+    fun `a yearly flow pays in the month it names`() {
+        val token = register("bonus@example.com")
+        val year = LocalDate.now().year
+
+        // Paid in a month that has already begun and whose payday has passed, otherwise there
+        // is nothing to have received yet.
+        val month = LocalDate.now().monthValue
+        saveFlow(
+            token,
+            """{"name":"Bonus","direction":"INCOME","amount":"1200.00","period":"YEARLY","arrivesMonth":$month,"arrivesOn":1,"startsOn":"$year-01-01"}""",
+        )
+
+        val flow = ledger(token)["flows"][0]
+        assertThat(flow["arrivesMonth"].asInt()).isEqualTo(month)
+        // It landed in this month rather than waiting for December.
+        assertThat(flow["receivedThisMonth"].money()).isEqualByComparingTo(BigDecimal("1200.00"))
+    }
+
+    @Test
+    @DisplayName("a yearly flow with no month named still closes its year, as it always did")
+    fun `a yearly flow without a payday keeps the old meaning`() {
+        val token = register("yearend@example.com")
+        val year = LocalDate.now().year
+
+        saveFlow(
+            token,
+            """{"name":"Bonus","direction":"INCOME","amount":"1200.00","period":"YEARLY","startsOn":"$year-01-01"}""",
+        )
+
+        val flow = ledger(token)["flows"][0]
+        // Absent rather than null: the serialiser leaves out what was never set.
+        assertThat(flow.path("arrivesMonth").isMissingNode || flow.path("arrivesMonth").isNull).isTrue()
+        // December has not finished, so nothing has landed yet.
+        assertThat(flow["receivedThisMonth"].money()).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private fun register(email: String): String {
@@ -831,7 +1005,25 @@ class LedgerIntegrationTest {
         return objectMapper.readTree(result.response.contentAsString)["accessToken"].asText()
     }
 
-    private fun saveFlow(token: String, body: String): String =
+    /**
+     * Saves a flow, dating it to the first of this month unless the test says otherwise.
+     *
+     * Almost every test here is about something other than when a flow began -- a payday, a
+     * fund's share, a rate -- and each means one that has been running all month. The server
+     * defaults to today instead, deliberately, because it must not credit days nobody lived.
+     * Saying so once here is better than repeating a date down seventeen call sites, and a
+     * test that cares about the default says its own start date or omits this helper.
+     */
+    private fun saveFlow(token: String, body: String): String {
+        val node = objectMapper.readTree(body) as ObjectNode
+        if (!node.has("startsOn")) {
+            node.put("startsOn", LocalDate.now().withDayOfMonth(1).toString())
+        }
+        return postFlow(token, objectMapper.writeValueAsString(node))
+    }
+
+    /** Sends exactly what it is given, so the server's own defaults can be tested. */
+    private fun postFlow(token: String, body: String): String =
         mockMvc.perform(
             post("/api/ledger/flows")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")

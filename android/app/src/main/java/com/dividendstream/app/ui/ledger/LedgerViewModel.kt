@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.remote.CashFlowDto
 import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.local.SettingsStore
@@ -289,6 +290,17 @@ class LedgerViewModel(
      * same thing twice. A save that succeeds reloads the ledger, because every figure on the
      * screen -- the rate, the funds, the month's totals -- moves when one flow changes.
      */
+    /**
+     * Saves a repeating flow, optionally without letting the change reach the past.
+     *
+     * [effectiveFrom] is what separates a raise from a correction. Given, the flow is closed
+     * the evening before that day and a second one carries the new figures on from it, so a
+     * finished month is still answered by what was true in it. Left null, the change applies
+     * from the flow's own beginning, which is what a mistyped number needs.
+     *
+     * The successor's id is chosen here, before anything is sent. The queue may deliver the
+     * same change twice and a server-picked id would let the retry split again.
+     */
     fun saveFlow(
         id: String? = null,
         name: String,
@@ -297,8 +309,10 @@ class LedgerViewModel(
         period: String,
         category: String?,
         arrivesOn: Int? = null,
+        arrivesMonth: Int? = null,
         startsOn: LocalDate? = null,
         endsOn: LocalDate? = null,
+        effectiveFrom: LocalDate? = null,
         onSaved: () -> Unit = {},
     ) = enqueue(onSaved) {
         PendingLedgerWrite.Flow(
@@ -309,12 +323,38 @@ class LedgerViewModel(
             period = period,
             category = category,
             arrivesOn = arrivesOn,
+            arrivesMonth = arrivesMonth,
             startsOn = startsOn,
             endsOn = endsOn,
+            effectiveFrom = effectiveFrom?.takeIf { id != null },
+            successorId = effectiveFrom?.takeIf { id != null }?.let { UUID.randomUUID().toString() },
             queuedAt = Instant.now(),
         )
     }
 
+    /**
+     * Stops a flow on [lastDay], keeping everything it earned up to then.
+     *
+     * What "delete" ought to mean nearly every time somebody presses it. Deleting the row
+     * removes the flow from every month it ever ran in -- an interest of RM0.29 a day, dropped
+     * because it has closed, takes away every ringgit it ever paid. This ends it instead, which
+     * is the truth: it ran, and now it does not.
+     */
+    fun stopFlow(flow: CashFlowDto, lastDay: LocalDate, onSaved: () -> Unit = {}) = saveFlow(
+        id = flow.id,
+        name = flow.name,
+        direction = flow.direction,
+        amount = flow.amount,
+        period = flow.period,
+        category = flow.category,
+        arrivesOn = flow.arrivesOn,
+        arrivesMonth = flow.arrivesMonth,
+        startsOn = flow.startsOn,
+        endsOn = lastDay,
+        onSaved = onSaved,
+    )
+
+    /** Erases a flow and everything it ever contributed. For one entered by mistake. */
     fun deleteFlow(id: String, label: String = "this") =
         remove(PendingLedgerWrite.Delete.Target.FLOW, id, label)
 

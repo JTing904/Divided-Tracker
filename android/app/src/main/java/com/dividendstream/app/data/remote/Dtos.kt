@@ -332,10 +332,27 @@ data class SaveCashFlowRequest(
     /** DAILY, WEEKLY, MONTHLY or YEARLY. */
     val period: String,
     val category: String? = null,
-    /** Which day of its period this pays on. 1-7 for weekly, 1-31 for monthly; else null. */
+    /** Which day of its period this pays on. 1-7 weekly, 1-31 monthly or yearly; else null. */
     val arrivesOn: Int? = null,
+    /** Which month a yearly flow pays in, 1-12. Null for every shorter period. */
+    val arrivesMonth: Int? = null,
     val startsOn: LocalDate? = null,
     val endsOn: LocalDate? = null,
+    /**
+     * The day these figures start applying, when they must not apply to the past.
+     *
+     * A raise is not a correction. Sent, the server closes this flow the evening before and
+     * carries the new figures forward on a second one, so a finished month still answers with
+     * what was true in it. Null means the old figures were simply wrong.
+     */
+    val effectiveFrom: LocalDate? = null,
+    /**
+     * The id for the second flow a split creates, chosen here rather than by the server.
+     *
+     * Every write may be sent twice by the queue, and a server-picked id would let the retry
+     * split an already-split flow again.
+     */
+    val successorId: String? = null,
 )
 
 @Serializable
@@ -381,6 +398,8 @@ data class CashFlowDto(
      * across the month is a picture of a pace, not of what anybody holds.
      */
     val arrivesOn: Int? = null,
+    /** Which month a yearly flow pays in, or null for the day its year ends. */
+    val arrivesMonth: Int? = null,
     /** What has actually landed: whole periods that have finished. */
     val receivedThisMonth: BigDecimal = BigDecimal.ZERO,
 )
