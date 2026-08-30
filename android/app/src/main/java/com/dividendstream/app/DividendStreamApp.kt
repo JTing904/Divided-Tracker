@@ -3,6 +3,7 @@ package com.dividendstream.app
 import android.app.Application
 import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.firestore.FirebaseSessionRepository
+import com.dividendstream.app.data.firestore.FirestoreIncomeGoals
 import com.dividendstream.app.data.firestore.FirestoreLedgerAdapter
 import com.dividendstream.app.data.firestore.FirestoreLedgerRepository
 import com.dividendstream.app.data.firestore.LedgerMigration
@@ -18,6 +19,7 @@ import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
 import com.dividendstream.app.data.repository.LedgerSource
+import com.dividendstream.app.data.repository.IncomeGoalStore
 import com.dividendstream.app.data.repository.LedgerQueue
 import com.dividendstream.app.data.repository.PurchaseQueue
 import com.google.firebase.Firebase
@@ -102,6 +104,8 @@ class AppContainer(application: Application) {
     private val firestore: FirebaseFirestore by lazy { Firebase.firestore }
 
     val firebaseSession by lazy { FirebaseSessionRepository(firebaseAuth, firestore) }
+
+    val incomeGoals: IncomeGoalStore by lazy { FirestoreIncomeGoals(firebaseAuth, firestore) }
 
     val ledgerSource: LedgerSource by lazy {
         FirestoreLedgerAdapter(

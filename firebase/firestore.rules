@@ -49,9 +49,16 @@ service cloud.firestore {
       // The uid is the document id, so a person cannot create a profile that is not their own
       // however the request is put together.
       allow create, update: if isOwner(uid)
-        && incoming().keys().hasOnly(['displayName', 'email', 'baseCurrency', 'createdAt'])
+        && incoming().keys().hasOnly([
+             'displayName', 'email', 'baseCurrency', 'createdAt', 'monthlyIncomeGoal'
+           ])
         && incoming().baseCurrency is string
-        && incoming().baseCurrency.size() == 3;
+        && incoming().baseCurrency.size() == 3
+        // A figure somebody chose, so it is money and obeys the same rule as every other
+        // amount here: a string, never one of Firestore's doubles.
+        && (!('monthlyIncomeGoal' in incoming())
+            || incoming().monthlyIncomeGoal == null
+            || isMoney(incoming().monthlyIncomeGoal));
       // Deliberately absent: deleting a profile would orphan everything beneath it, since
       // Firestore does not cascade. Removing an account is a deliberate act that has to walk
       // the subcollections, not something a stray call can do.

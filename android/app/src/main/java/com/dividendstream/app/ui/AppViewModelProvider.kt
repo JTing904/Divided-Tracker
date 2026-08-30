@@ -42,6 +42,7 @@ object AppViewModelProvider {
                 container.ledgerRepository,
                 container.appInfoRepository,
                 container.serverClock,
+                container.incomeGoals,
             )
         }
         initializer { PortfolioViewModel(container.portfolioRepository, container.purchaseQueue) }

@@ -65,6 +65,15 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
+import com.dividendstream.app.core.formatAmount
+import com.dividendstream.app.ui.components.DsTextField
+import com.dividendstream.app.ui.components.FittedFigure
+import java.math.BigDecimal
 
 @Composable
 fun DashboardScreen(
@@ -110,6 +119,8 @@ fun DashboardScreen(
             }
 
             item { LiveDividendCard(state, viewModel.serverClock) }
+
+            item { IncomeGoalCard(state, snapshot, viewModel.serverClock, viewModel::setIncomeGoal) }
 
             item { RateBreakdownGrid(snapshot) }
 
@@ -401,3 +412,165 @@ private fun EstimateDisclaimer() {
     }
 }
 
+/**
+ * How far a month's dividends go towards what somebody is aiming for.
+ *
+ * The one figure on this screen that is nobody's business but the person's, which is why it
+ * is kept with their own data rather than behind the price server -- and why it survives the
+ * server being asleep, unlike everything else here.
+ *
+ * The bar is the projection against the goal, because that is the question ("will I get
+ * there?"). The figure beside it is what has actually accrued, and it moves, because that is
+ * the answer arriving. A tracker that only draws a static bar can tell you where you stand; it
+ * cannot show you getting closer.
+ */
+@Composable
+private fun IncomeGoalCard(
+    state: DashboardUiState,
+    snapshot: LiveDividendDto,
+    clock: ServerClock,
+    onSet: (BigDecimal?) -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+    val goal = state.incomeGoal
+    val perMonth = snapshot.rate.perMonth
+    val accrued by rememberAccruedAmount(state.streams, clock)
+
+    DsCard(modifier = Modifier.fillMaxWidth().clickable { editing = true }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OverlineText(
+                if (goal == null) "Set a monthly income goal" else "Monthly income goal",
+                modifier = Modifier.weight(1f),
+            )
+            OverlineText(
+                if (goal == null) "Set" else "Change",
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+
+        if (goal == null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Say what you want your holdings to pay each month, and this shows how close " +
+                    "they are -- and how much closer they get every second.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            val reached = if (goal.signum() <= 0) 0f
+            else perMonth.toFloat() / goal.toFloat()
+
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                FittedFigure(
+                    text = perMonth.formatMoney(snapshot.currency),
+                    style = MonoFigure.copy(fontSize = MonoFigure.fontSize * 1.6f),
+                    color = if (reached >= 1f) DividendColors.Growth
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "of ${goal.formatMoney(snapshot.currency)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            AccrualProgressBar(progress = reached)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (reached >= 1f) {
+                    "You are there -- ${perMonth.formatMoney(snapshot.currency)} a month expected."
+                } else {
+                    "${goal.subtract(perMonth).formatMoney(snapshot.currency)} a month to go."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    accrued.formatAmount(Precision.LIVE),
+                    style = MonoFigure,
+                    color = DividendColors.Growth,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                OverlineText("accruing right now")
+            }
+        }
+    }
+
+    if (editing) {
+        IncomeGoalDialog(
+            current = goal,
+            onDismiss = { editing = false },
+            onSet = { editing = false; onSet(it) },
+        )
+    }
+}
+
+@Composable
+private fun IncomeGoalDialog(
+    current: BigDecimal?,
+    onDismiss: () -> Unit,
+    onSet: (BigDecimal?) -> Unit,
+) {
+    var text by remember { mutableStateOf(current?.toPlainString().orEmpty()) }
+    val parsed = text.trim().replace(",", "").toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                "Monthly income goal",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    "What you would like your holdings to pay you every month.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                DsTextField(
+                    label = "Each month",
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = "500.00",
+                    keyboardType = KeyboardType.Decimal,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { parsed?.let(onSet) }, enabled = parsed != null) {
+                Text(
+                    "Save",
+                    color = if (parsed != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        dismissButton = {
+            Row {
+                // Clearing is a real choice, not an edge case: a goal somebody has outgrown
+                // should be removable without setting a fake one.
+                if (current != null) {
+                    TextButton(onClick = { onSet(null) }) {
+                        Text("Clear", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+    )
+}

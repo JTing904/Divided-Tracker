@@ -10,6 +10,7 @@ import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
+import com.dividendstream.app.data.repository.IncomeGoalStore
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
 import com.dividendstream.app.ui.ledger.LedgerStreams
@@ -45,6 +46,13 @@ data class DashboardUiState(
     val ledger: LedgerDto? = null,
     /** The ledger's flows as counter parameters, so the home screen can tick them too. */
     val ledgerStreams: LedgerStreams = LedgerStreams(),
+    /**
+     * What the person is aiming to earn each month, or null while they have not said.
+     *
+     * Null is a real answer rather than zero: nobody's goal is nothing, so a zero here would
+     * be a target already met and a progress bar that is always full.
+     */
+    val incomeGoal: java.math.BigDecimal? = null,
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
@@ -54,10 +62,32 @@ class DashboardViewModel(
     private val ledgerRepository: LedgerRepository,
     private val appInfoRepository: AppInfoRepository,
     val serverClock: ServerClock,
+    /**
+     * Where the income goal is kept, and null on the desktop.
+     *
+     * It is a figure the person chose rather than one the market reports, so it belongs with
+     * their own data rather than behind the price server -- which is the whole rule now: what
+     * you type lives in Firestore, and Render is left doing the one thing only a server can,
+     * which is knowing what a share is worth.
+     */
+    private val goals: IncomeGoalStore? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DashboardUiState())
     val state = _state.asStateFlow()
+
+    init {
+        goals?.let { store ->
+            viewModelScope.launch {
+                store.goal().collect { monthly -> _state.update { it.copy(incomeGoal = monthly) } }
+            }
+        }
+    }
+
+    /** Null clears it, which is how somebody stops being nagged by a number they outgrew. */
+    fun setIncomeGoal(monthly: java.math.BigDecimal?) {
+        viewModelScope.launch { goals?.set(monthly) }
+    }
 
     init {
         refresh()

@@ -2,6 +2,7 @@ package com.dividendstream.app.data.firestore
 
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
+import com.dividendstream.app.data.repository.IncomeGoalStore
 import com.dividendstream.app.data.repository.SessionMirror
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -27,6 +28,44 @@ data class FirebaseAccount(
     val email: String,
     val baseCurrency: String = "MYR",
 )
+
+/**
+ * Keeps a monthly income goal on the person's own profile.
+ *
+ * Separate from the session repository so the dashboard depends on the goal and not on
+ * everything else Firebase can do.
+ */
+class FirestoreIncomeGoals(
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+) : IncomeGoalStore {
+
+    override fun goal(): Flow<java.math.BigDecimal?> = callbackFlow {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            trySend(null)
+            awaitClose { }
+            return@callbackFlow
+        }
+        // On the profile document rather than in a collection of its own: it is one number
+        // about the person, and a collection holding exactly one document forever only ever
+        // costs a reader time.
+        val registration = firestore.collection("users").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                val raw = snapshot?.getString("monthlyIncomeGoal")
+                trySend(raw?.let { runCatching { java.math.BigDecimal(it) }.getOrNull() })
+            }
+        awaitClose { registration.remove() }
+    }
+
+    /** Written as a string, like every other amount here. Null clears it. */
+    override suspend fun set(monthly: java.math.BigDecimal?) {
+        val uid = auth.currentUser?.uid ?: return
+        firestore.collection("users").document(uid)
+            .set(mapOf("monthlyIncomeGoal" to monthly?.toPlainString()), SetOptions.merge())
+            .await()
+    }
+}
 
 /**
  * Signing in, without a server of ours in the middle.
