@@ -6,6 +6,8 @@ import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
 import com.dividendstream.app.core.dataOrNull
 import com.dividendstream.app.data.remote.GoogleConfigDto
+import com.dividendstream.app.data.repository.SessionMirror
+import com.dividendstream.app.data.remote.GoogleAuthAttempt
 import com.dividendstream.app.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,7 +37,20 @@ data class LoginUiState(
     val showGoogle: Boolean get() = google?.enabled == true
 }
 
-class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
+/**
+ * Signs in to both halves of the app at once.
+ *
+ * The ledger lives in Firestore and the portfolio still lives behind the API, so there are two
+ * accounts to hold and one password to do it with. Rather than ask twice, a successful sign-in
+ * here is mirrored into Firebase, creating the Firebase account the first time if it is not
+ * there yet. Nobody has to know there are two.
+ *
+ * [firebase] is null on the desktop, which has no Firebase SDK and stays wholly on the API.
+ */
+class LoginViewModel(
+    private val authRepository: AuthRepository,
+    private val firebase: SessionMirror? = null,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(LoginUiState())
     val state = _state.asStateFlow()
@@ -93,7 +108,13 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
             }
 
             when (val result = authRepository.signInWithGoogle(attempt, _state.value.inviteCode)) {
-                is AppResult.Success -> _state.update { it.copy(isGoogleSubmitting = false) }
+                is AppResult.Success -> {
+                    // The same Google token both sides trust, so there is nothing to create.
+                    // Only the phone's flow carries one: the desktop signs in with an
+                    // authorisation code, which is redeemed by a server rather than by us.
+                    (attempt as? GoogleAuthAttempt.IdToken)?.let { firebase?.signInWithGoogle(it.idToken) }
+                    _state.update { it.copy(isGoogleSubmitting = false) }
+                }
                 is AppResult.Failure -> _state.update {
                     it.copy(
                         isGoogleSubmitting = false,
@@ -108,6 +129,20 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
         }
     }
 
+    /**
+     * Signs in to Firebase with the same details, creating the account if this is the first time.
+     *
+     * Failures are swallowed on purpose. The person is signed in as far as they can tell, and
+     * the ledger being empty until this succeeds is a better outcome than an error about a
+     * second system they were never told existed. It is retried on every sign-in.
+     */
+    private suspend fun mirrorToFirebase(name: String, email: String, password: String) {
+        val session = firebase ?: return
+        if (session.signIn(email, password) == "NO_SUCH_USER") {
+            session.createAccount(name, email, password)
+        }
+    }
+
     /** Navigation is driven by [com.dividendstream.app.ui.SessionViewModel] observing the store. */
     fun submit() {
         val current = _state.value
@@ -116,7 +151,11 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true, error = null) }
             when (val result = authRepository.login(current.email, current.password)) {
-                is AppResult.Success -> _state.update { it.copy(isSubmitting = false) }
+                is AppResult.Success -> {
+                    mirrorToFirebase(result.data.userName, current.email, current.password)
+                    _state.update { it.copy(isSubmitting = false) }
+                }
+
                 is AppResult.Failure -> _state.update { it.copy(isSubmitting = false, error = result.error) }
             }
         }
@@ -152,7 +191,10 @@ data class RegisterUiState(
     }
 }
 
-class RegisterViewModel(private val authRepository: AuthRepository) : ViewModel() {
+class RegisterViewModel(
+    private val authRepository: AuthRepository,
+    private val firebase: SessionMirror? = null,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(RegisterUiState())
     val state = _state.asStateFlow()
@@ -177,7 +219,12 @@ class RegisterViewModel(private val authRepository: AuthRepository) : ViewModel(
                 current.name, current.email, current.password, current.inviteCode,
             )
             when (result) {
-                is AppResult.Success -> _state.update { it.copy(isSubmitting = false) }
+                is AppResult.Success -> {
+                    // Same password, same person, second system. See LoginViewModel.
+                    firebase?.createAccount(current.name, current.email, current.password)
+                    _state.update { it.copy(isSubmitting = false) }
+                }
+
                 is AppResult.Failure -> _state.update { it.copy(isSubmitting = false, error = result.error) }
             }
         }

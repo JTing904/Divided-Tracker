@@ -61,7 +61,7 @@ object AppViewModelProvider {
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
         initializer { LedgerViewModel(
-                container.ledgerRepository,
+                container.ledgerSource,
                 container.ledgerQueue,
                 container.settingsStore,
                 container.serverClock,

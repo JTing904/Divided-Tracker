@@ -2,6 +2,7 @@ package com.dividendstream.app.data.firestore
 
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
+import com.dividendstream.app.data.repository.SessionMirror
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
@@ -42,7 +43,7 @@ data class FirebaseAccount(
 class FirebaseSessionRepository(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-) {
+) : SessionMirror {
 
     /** The signed-in account, or null. Emits again whenever that changes. */
     val accounts: Flow<FirebaseAccount?> = callbackFlow {
@@ -71,13 +72,24 @@ class FirebaseSessionRepository(
     }
 
     /** Takes the Google ID token the Credential Manager already fetches for the old backend. */
-    suspend fun signInWithGoogle(idToken: String): AppResult<FirebaseAccount> = attempt {
+    suspend fun googleSignIn(idToken: String): AppResult<FirebaseAccount> = attempt {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         val result = auth.signInWithCredential(credential).await()
         requireNotNull(result.user).toAccount().also { writeProfile(it.uid, it.name, it.email) }
     }
 
     fun logout() = auth.signOut()
+
+    // --- the neutral seam the sign-in screens use -----------------------------
+
+    override suspend fun signIn(email: String, password: String): String? =
+        (login(email, password) as? AppResult.Failure)?.error?.code
+
+    override suspend fun createAccount(name: String, email: String, password: String): String? =
+        (register(name, email, password) as? AppResult.Failure)?.error?.code
+
+    override suspend fun signInWithGoogle(idToken: String): String? =
+        (googleSignIn(idToken) as? AppResult.Failure)?.error?.code
 
     /**
      * Writes the profile, leaving alone anything already there.

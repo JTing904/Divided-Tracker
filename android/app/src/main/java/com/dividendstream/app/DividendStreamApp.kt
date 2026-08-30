@@ -2,6 +2,9 @@ package com.dividendstream.app
 
 import android.app.Application
 import com.dividendstream.app.core.ServerClock
+import com.dividendstream.app.data.firestore.FirebaseSessionRepository
+import com.dividendstream.app.data.firestore.FirestoreLedgerAdapter
+import com.dividendstream.app.data.firestore.FirestoreLedgerRepository
 import com.dividendstream.app.data.local.PendingLedgerStore
 import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
@@ -13,8 +16,14 @@ import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.LedgerSource
 import com.dividendstream.app.data.repository.LedgerQueue
 import com.dividendstream.app.data.repository.PurchaseQueue
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -79,6 +88,23 @@ class AppContainer(application: Application) {
         availability = serverAvailability,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
+
+    // --- Firebase ------------------------------------------------------------
+    //
+    // The ledger's home now. Firestore keeps a copy on the device, answers from it before any
+    // network is involved and sends changes when it can, which is what takes the wait out of
+    // opening the app -- there is nothing here that has to wake up first.
+    //
+    // The portfolio and dividends still go through the API above, because working out what a
+    // holding is expected to pay means fetching prices, and fetching prices needs a server.
+    private val firebaseAuth: FirebaseAuth by lazy { Firebase.auth }
+    private val firestore: FirebaseFirestore by lazy { Firebase.firestore }
+
+    val firebaseSession by lazy { FirebaseSessionRepository(firebaseAuth, firestore) }
+
+    val ledgerSource: LedgerSource by lazy {
+        FirestoreLedgerAdapter(FirestoreLedgerRepository(firestore, firebaseSession, serverClock))
+    }
 }
 
 class DividendStreamApp : Application() {

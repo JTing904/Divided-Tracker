@@ -1,0 +1,111 @@
+package com.dividendstream.app.data.firestore
+
+import com.dividendstream.app.data.repository.LedgerResult
+import com.dividendstream.app.data.repository.LedgerSource
+import com.dividendstream.app.domain.StoredFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.YearMonth
+
+/**
+ * The Firestore ledger, in the shape the rest of the app already asks questions in.
+ *
+ * Thin on purpose. Everything of substance happens either side of it -- Firestore holds the
+ * records, [com.dividendstream.app.domain.LedgerCalculator] works the figures out -- and this
+ * only translates between the two vocabularies so that neither had to be bent to fit the
+ * other.
+ */
+class FirestoreLedgerAdapter(
+    private val repository: FirestoreLedgerRepository,
+) : LedgerSource {
+
+    override fun ledger(period: String, browsing: String?): Flow<LedgerResult> =
+        repository.ledger(period, browsing?.let { runCatching { YearMonth.parse(it) }.getOrNull() })
+            // Never stale. There is no newer copy being waited on that this one stands in for:
+            // it *is* the copy, and anything newer arrives as another emission rather than as
+            // a reason to apologise for this one.
+            .map { LedgerResult(ledger = it, isStale = false) }
+
+    override suspend fun saveFlow(
+        id: String,
+        name: String,
+        direction: String,
+        amount: BigDecimal,
+        period: String,
+        category: String?,
+        arrivesOn: Int?,
+        arrivesMonth: Int?,
+        startsOn: LocalDate?,
+        endsOn: LocalDate?,
+        effectiveFrom: LocalDate?,
+    ) {
+        val begins = startsOn ?: LocalDate.now()
+        val updated = StoredFlow(
+            id = id, name = name, direction = direction, amount = amount, period = period,
+            category = category, arrivesOn = arrivesOn, arrivesMonth = arrivesMonth,
+            startsOn = begins, endsOn = endsOn,
+        )
+
+        // A raise, rather than a correction: close the old one the evening before and carry the
+        // new figures forward on a second, so every finished month still answers with what was
+        // true in it. The existing flow has to be read first because the split needs the dates
+        // it already had, not the ones the form is holding.
+        val existing = effectiveFrom?.let { from ->
+            repository.ledger("MONTH", null).first().flows
+                .firstOrNull { it.id == id }
+                ?.takeIf { it.startsOn.isBefore(from) && (it.endsOn == null || !it.endsOn.isBefore(from)) }
+        }
+
+        if (existing != null && effectiveFrom != null) {
+            repository.splitFlow(
+                existing = StoredFlow(
+                    id = existing.id, name = existing.name, direction = existing.direction,
+                    amount = existing.amount, period = existing.period, category = existing.category,
+                    currency = existing.currency, arrivesOn = existing.arrivesOn,
+                    arrivesMonth = existing.arrivesMonth, startsOn = existing.startsOn,
+                    endsOn = existing.endsOn,
+                ),
+                successorId = java.util.UUID.randomUUID().toString(),
+                effectiveFrom = effectiveFrom,
+                updated = updated,
+            )
+            return
+        }
+
+        repository.saveFlow(
+            id, name, direction, amount, period, category, arrivesOn, arrivesMonth, begins, endsOn,
+        )
+    }
+
+    override suspend fun deleteFlow(id: String) = repository.deleteFlow(id)
+
+    override suspend fun saveEntry(
+        id: String,
+        direction: String,
+        amount: BigDecimal,
+        occurredOn: LocalDate,
+        category: String?,
+        note: String?,
+    ) = repository.saveEntry(id, direction, amount, occurredOn, category, note)
+
+    override suspend fun deleteEntry(id: String) = repository.deleteEntry(id)
+
+    override suspend fun saveFund(id: String, name: String, percent: BigDecimal, icon: String?) =
+        repository.saveFund(id, name, percent, icon)
+
+    override suspend fun deleteFund(id: String) = repository.deleteFund(id)
+
+    override suspend fun saveFundMovement(
+        id: String,
+        fundId: String,
+        direction: String,
+        amount: BigDecimal,
+        occurredOn: LocalDate,
+        note: String?,
+    ) = repository.saveFundMovement(id, fundId, direction, amount, occurredOn, note)
+
+    override suspend fun deleteFundMovement(id: String) = repository.deleteFundMovement(id)
+}

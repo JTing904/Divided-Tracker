@@ -34,8 +34,8 @@ object AppViewModelProvider {
 
     fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
         initializer { SessionViewModel(container.authRepository) }
-        initializer { LoginViewModel(container.authRepository) }
-        initializer { RegisterViewModel(container.authRepository) }
+        initializer { LoginViewModel(container.authRepository, container.firebaseSession) }
+        initializer { RegisterViewModel(container.authRepository, container.firebaseSession) }
         initializer {
             DashboardViewModel(
                 container.dividendRepository,
@@ -54,12 +54,17 @@ object AppViewModelProvider {
         }
         initializer { CalendarViewModel(container.dividendRepository, container.serverClock) }
         initializer { HistoryViewModel(container.dividendRepository) }
-        initializer { LedgerViewModel(
-                container.ledgerRepository,
-                container.ledgerQueue,
-                container.settingsStore,
-                container.serverClock,
-            ) }
+        initializer {
+            LedgerViewModel(
+                container.ledgerSource,
+                // Nothing queues on Firestore: a write is in the local database before the
+                // call returns, so there is never a change entered but not yet visible for a
+                // card to explain.
+                queue = null,
+                settingsStore = container.settingsStore,
+                serverClock = container.serverClock,
+            )
+        }
         initializer {
             ProfileViewModel(
                 container.authRepository,

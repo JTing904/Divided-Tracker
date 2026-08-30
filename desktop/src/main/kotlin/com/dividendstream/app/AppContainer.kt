@@ -12,6 +12,8 @@ import com.dividendstream.app.data.repository.AuthRepository
 import com.dividendstream.app.data.repository.DividendRepository
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.data.repository.PortfolioRepository
+import com.dividendstream.app.data.repository.ApiLedgerSource
+import com.dividendstream.app.data.repository.LedgerSource
 import com.dividendstream.app.data.repository.LedgerQueue
 import com.dividendstream.app.data.repository.PurchaseQueue
 import kotlinx.coroutines.CoroutineScope
@@ -73,4 +75,13 @@ class AppContainer {
         availability = serverAvailability,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
+
+    /**
+     * Still the HTTP API, because the Firebase SDK the phone uses is Android-only.
+     *
+     * Deliberately unchanged rather than half-moved: a desktop on this path keeps its saved
+     * copy, its stale banner and its queue exactly as they were, so nothing regresses for the
+     * client that has not moved yet.
+     */
+    val ledgerSource: LedgerSource = ApiLedgerSource(ledgerRepository, ledgerQueue)
 }

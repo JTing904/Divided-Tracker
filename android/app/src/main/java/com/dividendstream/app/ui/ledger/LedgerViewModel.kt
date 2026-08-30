@@ -11,6 +11,7 @@ import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.local.SettingsStore
 import com.dividendstream.app.data.repository.LedgerQueue
 import com.dividendstream.app.domain.PendingLedgerWrite
+import com.dividendstream.app.data.repository.LedgerSource
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -162,8 +163,15 @@ data class LedgerUiState(
 private const val HISTORY_MONTHS = 11L
 
 class LedgerViewModel(
-    private val ledgerRepository: LedgerRepository,
-    private val queue: LedgerQueue,
+    private val source: LedgerSource,
+    /**
+     * Null where nothing queues, which on Firestore is everywhere.
+     *
+     * Firestore applies a write to the copy on the device and sends it itself, so there is no
+     * moment where a change is entered but invisible -- which is the only thing the queue's
+     * card existed to explain. The desktop still has one and still shows it.
+     */
+    private val queue: LedgerQueue?,
     private val settingsStore: SettingsStore,
     val serverClock: ServerClock,
 ) : ViewModel() {
@@ -181,13 +189,15 @@ class LedgerViewModel(
             _state.update { it.copy(period = LedgerPeriod.of(settingsStore.ledgerPeriod.first())) }
             refresh()
         }
-        viewModelScope.launch {
-            queue.pending.collect { waiting -> _state.update { it.copy(pending = waiting) } }
+        queue?.let { pendingQueue ->
+            viewModelScope.launch {
+                pendingQueue.pending.collect { waiting -> _state.update { it.copy(pending = waiting) } }
+            }
+            // Something got through: what the server says has changed, so fetch it. Set rather
+            // than added to, because this view model is rebuilt whenever the tab is entered and
+            // the queue outlives it.
+            pendingQueue.onSettled = { refresh() }
         }
-        // Something got through: what the server says has changed, so fetch it. Set rather
-        // than added to, because this view model is rebuilt whenever the tab is entered and
-        // the queue outlives it.
-        queue.onSettled = { refresh() }
     }
 
     /** Switching period reloads: the server measures the figures, not the screen. */
@@ -230,55 +240,45 @@ class LedgerViewModel(
         it.copy(selectedDay = if (it.selectedDay == day) null else day)
     }
 
+    /**
+     * Subscribes to the ledger for the period being shown.
+     *
+     * Cancelled and restarted whenever the period or the browsed month changes, because those
+     * choose which question is being asked rather than filtering an answer already given.
+     *
+     * On Firestore this returns figures before the first frame is drawn and then keeps
+     * returning them; on the API it emits a saved copy and then whatever the server says. The
+     * one difference the screen can see is the banner, which is driven by [LedgerResult].
+     */
+    private var subscription: kotlinx.coroutines.Job? = null
+
     fun refresh(fromPull: Boolean = false) {
-        viewModelScope.launch {
-            // Saved copy first, before the request goes out rather than after it fails. The
-            // server sleeps between uses, and the figures here are derived from timestamps --
-            // so a saved ledger is still counting, and still correct, while it wakes.
-            if (_state.value.ledger == null) {
-                ledgerRepository.cachedLedger()?.let { cached ->
-                    _state.update {
-                        it.copy(
+        subscription?.cancel()
+        _state.update {
+            it.copy(isLoading = it.ledger == null, isRefreshing = fromPull, error = null)
+        }
+        val browsing = _state.value.browsing
+        subscription = viewModelScope.launch {
+            source.ledger(_state.value.period.wire, browsing?.toString()).collect { result ->
+                _state.update {
+                    val ledger = result.ledger
+                    when {
+                        ledger != null -> it.copy(
                             isLoading = false,
-                            ledger = cached.value,
-                            streams = cached.value.toStreams(),
-                            isStale = true,
-                            cachedAt = cached.cachedAt,
-                            staleError = null,
+                            isRefreshing = false,
+                            ledger = ledger,
+                            streams = ledger.toStreams(),
+                            isStale = result.isStale,
+                            cachedAt = result.cachedAt,
+                            staleError = result.error,
+                            error = null,
                         )
-                    }
-                }
-            }
+                        // A failure with figures already on screen explains why they are old,
+                        // rather than replacing them with an error nobody can act on.
+                        it.ledger != null ->
+                            it.copy(isLoading = false, isRefreshing = false, staleError = result.error)
 
-            _state.update {
-                it.copy(isLoading = it.ledger == null, isRefreshing = fromPull, error = null)
-            }
-
-            val browsing = _state.value.browsing
-            when (
-                val result = ledgerRepository.ledger(
-                    _state.value.period.wire,
-                    browsing?.toString(),
-                )
-            ) {
-                is AppResult.Success -> _state.update {
-                    it.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        ledger = result.data.value,
-                        streams = result.data.value.toStreams(),
-                        isStale = result.data.isStale,
-                        cachedAt = result.data.cachedAt,
-                        staleError = result.data.staleError,
-                        error = null,
-                    )
-                }
-
-                is AppResult.Failure -> _state.update {
-                    if (it.ledger != null) {
-                        it.copy(isLoading = false, isRefreshing = false, staleError = result.error)
-                    } else {
-                        it.copy(isLoading = false, isRefreshing = false, error = result.error)
+                        else -> it.copy(isLoading = false, isRefreshing = false, error = result.error)
                     }
                 }
             }
@@ -314,9 +314,9 @@ class LedgerViewModel(
         endsOn: LocalDate? = null,
         effectiveFrom: LocalDate? = null,
         onSaved: () -> Unit = {},
-    ) = enqueue(onSaved) {
-        PendingLedgerWrite.Flow(
-            key = id ?: UUID.randomUUID().toString(),
+    ) = write(onSaved) {
+        source.saveFlow(
+            id = id ?: UUID.randomUUID().toString(),
             name = name,
             direction = direction,
             amount = amount,
@@ -326,9 +326,8 @@ class LedgerViewModel(
             arrivesMonth = arrivesMonth,
             startsOn = startsOn,
             endsOn = endsOn,
+            // Only an existing flow can be split; a new one has no past to protect.
             effectiveFrom = effectiveFrom?.takeIf { id != null },
-            successorId = effectiveFrom?.takeIf { id != null }?.let { UUID.randomUUID().toString() },
-            queuedAt = Instant.now(),
         )
     }
 
@@ -355,8 +354,7 @@ class LedgerViewModel(
     )
 
     /** Erases a flow and everything it ever contributed. For one entered by mistake. */
-    fun deleteFlow(id: String, label: String = "this") =
-        remove(PendingLedgerWrite.Delete.Target.FLOW, id, label)
+    fun deleteFlow(id: String, label: String = "this") = write { source.deleteFlow(id) }
 
     fun saveEntry(
         id: String? = null,
@@ -366,20 +364,18 @@ class LedgerViewModel(
         category: String?,
         note: String?,
         onSaved: () -> Unit = {},
-    ) = enqueue(onSaved) {
-        PendingLedgerWrite.Entry(
-            key = id ?: UUID.randomUUID().toString(),
+    ) = write(onSaved) {
+        source.saveEntry(
+            id = id ?: UUID.randomUUID().toString(),
             direction = direction,
             amount = amount,
-            occurredOn = occurredOn,
+            occurredOn = occurredOn ?: LocalDate.now(),
             category = category,
             note = note,
-            queuedAt = Instant.now(),
         )
     }
 
-    fun deleteEntry(id: String, label: String = "this record") =
-        remove(PendingLedgerWrite.Delete.Target.ENTRY, id, label)
+    fun deleteEntry(id: String, label: String = "this record") = write { source.deleteEntry(id) }
 
     fun saveFund(
         id: String? = null,
@@ -387,18 +383,11 @@ class LedgerViewModel(
         percent: BigDecimal,
         icon: String?,
         onSaved: () -> Unit = {},
-    ) = enqueue(onSaved) {
-        PendingLedgerWrite.Fund(
-            key = id ?: UUID.randomUUID().toString(),
-            name = name,
-            percent = percent,
-            icon = icon,
-            queuedAt = Instant.now(),
-        )
+    ) = write(onSaved) {
+        source.saveFund(id ?: UUID.randomUUID().toString(), name, percent, icon)
     }
 
-    fun deleteFund(id: String, label: String = "this fund") =
-        remove(PendingLedgerWrite.Delete.Target.FUND, id, label)
+    fun deleteFund(id: String, label: String = "this fund") = write { source.deleteFund(id) }
 
     /**
      * Records money going into or out of a fund.
@@ -414,49 +403,54 @@ class LedgerViewModel(
         occurredOn: LocalDate? = null,
         note: String? = null,
         onSaved: () -> Unit = {},
-    ) = enqueue(onSaved) {
-        PendingLedgerWrite.Movement(
+    ) = write(onSaved) {
+        source.saveFundMovement(
             // Reusing the id turns the save into a correction rather than a second movement.
-            key = id ?: UUID.randomUUID().toString(),
+            id = id ?: UUID.randomUUID().toString(),
             fundId = fundId,
             direction = direction,
             amount = amount,
-            occurredOn = occurredOn,
+            occurredOn = occurredOn ?: LocalDate.now(),
             note = note,
-            queuedAt = Instant.now(),
         )
     }
 
     fun deleteFundMovement(id: String, label: String = "this entry") =
-        remove(PendingLedgerWrite.Delete.Target.MOVEMENT, id, label)
+        write { source.deleteFundMovement(id) }
 
     /** Drops a queued change the server refused. Only the person can decide to give up on one. */
-    fun discardPending(key: String) = viewModelScope.launch { queue.discard(key) }
+    fun discardPending(key: String) = viewModelScope.launch { queue?.discard(key) }
 
     /** Tries a blocked change again, once whatever it tripped over has been fixed. */
-    fun retryPending(key: String) = viewModelScope.launch { queue.retry(key) }
+    fun retryPending(key: String) = viewModelScope.launch { queue?.retry(key) }
 
     fun dismissActionError() = _state.update { it.copy(actionError = null) }
 
     /**
-     * Puts a change on the queue and closes the form.
+     * Makes a change and closes the form.
      *
-     * There is no spinner and no failure to report here: the change is on the device the
-     * moment this returns, and getting it to a server that may be asleep is the queue's
-     * problem rather than the person's.
+     * There is no spinner and no failure to report. On Firestore the change is in the local
+     * database before this returns and the listener has already emitted the new figures;
+     * getting it to a server is the store's problem rather than the person's. On the API path
+     * the queue makes the same promise by a longer route.
      */
-    private fun enqueue(onSaved: () -> Unit, build: () -> PendingLedgerWrite) {
+    private fun write(onSaved: () -> Unit = {}, block: suspend () -> Unit) {
         viewModelScope.launch {
-            queue.submit(build())
+            runCatching { block() }
+                .onFailure { failure ->
+                    _state.update {
+                        it.copy(
+                            actionError = com.dividendstream.app.core.AppError(
+                                code = "SAVE_FAILED",
+                                message = failure.message ?: "That could not be saved.",
+                                isRetryable = true,
+                            ),
+                        )
+                    }
+                }
             onSaved()
         }
     }
-
-    private fun remove(
-        target: PendingLedgerWrite.Delete.Target,
-        id: String,
-        label: String,
-    ) = viewModelScope.launch { queue.submitDelete(target, id, label) }
 
     private fun perform(onSuccess: () -> Unit = {}, block: suspend () -> AppResult<*>) {
         viewModelScope.launch {
