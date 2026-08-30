@@ -459,7 +459,11 @@ private fun EntryDialog(
     var category by remember {
         mutableStateOf(
             if (existing != null) LedgerIcon.of(existing.category)
-            else defaultIcon(income = false),
+            // Whichever button opened this. It was hardcoded to the expense default, so money
+            // received through "+ In" was filed as Food unless somebody noticed and changed
+            // it -- and the category is what the spending chart is drawn from, so a salary sat
+            // in there as food. Switching the toggle already moved it; opening it never did.
+            else defaultIcon(income = editor.direction == "INCOME"),
         )
     }
     var occurredOn by remember {
