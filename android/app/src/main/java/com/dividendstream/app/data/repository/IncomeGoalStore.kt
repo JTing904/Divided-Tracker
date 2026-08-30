@@ -13,7 +13,19 @@ import java.math.BigDecimal
 interface IncomeGoalStore {
 
     /** Null while none has been set. Emits again when it changes, from any device. */
-    fun goal(): Flow<BigDecimal?>
+    fun goal(): Flow<IncomeGoal?>
 
-    suspend fun set(monthly: BigDecimal?)
+    suspend fun set(goal: IncomeGoal?)
 }
+
+/**
+ * What somebody is aiming to earn, and over what stretch of time.
+ *
+ * The period is stored rather than normalised away. "RM20 a day" and "RM609 a month" are the
+ * same rate and not the same thought, and converting one into the other to store it means
+ * showing somebody a number they never typed -- with a rounding error, since months are not
+ * all the same length.
+ */
+data class IncomeGoal(val amount: BigDecimal, val period: GoalPeriod)
+
+enum class GoalPeriod { DAY, MONTH, YEAR }

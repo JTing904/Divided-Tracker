@@ -2,6 +2,8 @@ package com.dividendstream.app.data.firestore
 
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.core.AppResult
+import com.dividendstream.app.data.repository.GoalPeriod
+import com.dividendstream.app.data.repository.IncomeGoal
 import com.dividendstream.app.data.repository.IncomeGoalStore
 import com.dividendstream.app.data.repository.SessionMirror
 import com.google.firebase.auth.FirebaseAuth
@@ -40,29 +42,52 @@ class FirestoreIncomeGoals(
     private val firestore: FirebaseFirestore,
 ) : IncomeGoalStore {
 
-    override fun goal(): Flow<java.math.BigDecimal?> = callbackFlow {
+    override fun goal(): Flow<IncomeGoal?> = callbackFlow {
         val uid = auth.currentUser?.uid
         if (uid == null) {
             trySend(null)
             awaitClose { }
             return@callbackFlow
         }
-        // On the profile document rather than in a collection of its own: it is one number
+        // On the profile document rather than in a collection of its own: it is one figure
         // about the person, and a collection holding exactly one document forever only ever
         // costs a reader time.
         val registration = firestore.collection("users").document(uid)
             .addSnapshotListener { snapshot, _ ->
-                val raw = snapshot?.getString("monthlyIncomeGoal")
-                trySend(raw?.let { runCatching { java.math.BigDecimal(it) }.getOrNull() })
+                // A goal saved before periods existed was a monthly one, and is still read as
+                // one. Dropping it would have quietly cleared a target somebody had set.
+                val amount = snapshot?.getString("incomeGoal")
+                    ?: snapshot?.getString("monthlyIncomeGoal")
+                val period = snapshot?.getString("incomeGoalPeriod")
+                trySend(
+                    amount
+                        ?.let { runCatching { java.math.BigDecimal(it) }.getOrNull() }
+                        ?.let {
+                            IncomeGoal(
+                                it,
+                                runCatching { GoalPeriod.valueOf(period ?: "MONTH") }
+                                    .getOrDefault(GoalPeriod.MONTH),
+                            )
+                        },
+                )
             }
         awaitClose { registration.remove() }
     }
 
     /** Written as a string, like every other amount here. Null clears it. */
-    override suspend fun set(monthly: java.math.BigDecimal?) {
+    override suspend fun set(goal: IncomeGoal?) {
         val uid = auth.currentUser?.uid ?: return
         firestore.collection("users").document(uid)
-            .set(mapOf("monthlyIncomeGoal" to monthly?.toPlainString()), SetOptions.merge())
+            .set(
+                mapOf(
+                    "incomeGoal" to goal?.amount?.toPlainString(),
+                    "incomeGoalPeriod" to goal?.period?.name,
+                    // Cleared, so an old client reading only this field is not left showing a
+                    // goal that has since been changed or removed.
+                    "monthlyIncomeGoal" to null,
+                ),
+                SetOptions.merge(),
+            )
             .await()
     }
 }

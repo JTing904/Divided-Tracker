@@ -50,7 +50,12 @@ service cloud.firestore {
       // however the request is put together.
       allow create, update: if isOwner(uid)
         && incoming().keys().hasOnly([
-             'displayName', 'email', 'baseCurrency', 'createdAt', 'monthlyIncomeGoal'
+             'displayName', 'email', 'baseCurrency', 'createdAt',
+             // Still listed because a merge carries it forward: a document written before the
+             // goal had a period of its own keeps this field, and stripping it from the list
+             // would make every later write to that profile fail.
+             'monthlyIncomeGoal',
+             'incomeGoal', 'incomeGoalPeriod'
            ])
         && incoming().baseCurrency is string
         && incoming().baseCurrency.size() == 3
@@ -58,7 +63,13 @@ service cloud.firestore {
         // amount here: a string, never one of Firestore's doubles.
         && (!('monthlyIncomeGoal' in incoming())
             || incoming().monthlyIncomeGoal == null
-            || isMoney(incoming().monthlyIncomeGoal));
+            || isMoney(incoming().monthlyIncomeGoal))
+        && (!('incomeGoal' in incoming())
+            || incoming().incomeGoal == null
+            || isMoney(incoming().incomeGoal))
+        && (!('incomeGoalPeriod' in incoming())
+            || incoming().incomeGoalPeriod == null
+            || incoming().incomeGoalPeriod in ['DAY', 'MONTH', 'YEAR']);
       // Deliberately absent: deleting a profile would orphan everything beneath it, since
       // Firestore does not cascade. Removing an account is a deliberate act that has to walk
       // the subcollections, not something a stray call can do.

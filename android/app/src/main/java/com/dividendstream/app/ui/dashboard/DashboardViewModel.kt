@@ -10,6 +10,7 @@ import com.dividendstream.app.data.remote.LiveDividendDto
 import com.dividendstream.app.data.remote.toAccumulationStream
 import com.dividendstream.app.data.repository.AppInfoRepository
 import com.dividendstream.app.data.repository.DividendRepository
+import com.dividendstream.app.data.repository.IncomeGoal
 import com.dividendstream.app.data.repository.IncomeGoalStore
 import com.dividendstream.app.data.repository.LedgerRepository
 import com.dividendstream.app.domain.AccumulationStream
@@ -52,7 +53,7 @@ data class DashboardUiState(
      * Null is a real answer rather than zero: nobody's goal is nothing, so a zero here would
      * be a target already met and a progress bar that is always full.
      */
-    val incomeGoal: java.math.BigDecimal? = null,
+    val incomeGoal: IncomeGoal? = null,
 ) {
     val isEmpty: Boolean get() = snapshot != null && snapshot.streams.isEmpty()
 }
@@ -79,14 +80,14 @@ class DashboardViewModel(
     init {
         goals?.let { store ->
             viewModelScope.launch {
-                store.goal().collect { monthly -> _state.update { it.copy(incomeGoal = monthly) } }
+                store.goal().collect { goal -> _state.update { it.copy(incomeGoal = goal) } }
             }
         }
     }
 
     /** Null clears it, which is how somebody stops being nagged by a number they outgrew. */
-    fun setIncomeGoal(monthly: java.math.BigDecimal?) {
-        viewModelScope.launch { goals?.set(monthly) }
+    fun setIncomeGoal(goal: IncomeGoal?) {
+        viewModelScope.launch { goals?.set(goal) }
     }
 
     init {

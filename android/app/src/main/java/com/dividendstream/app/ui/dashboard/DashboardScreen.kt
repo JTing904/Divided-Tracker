@@ -74,6 +74,9 @@ import com.dividendstream.app.core.formatAmount
 import com.dividendstream.app.ui.components.DsTextField
 import com.dividendstream.app.ui.components.FittedFigure
 import java.math.BigDecimal
+import com.dividendstream.app.data.repository.GoalPeriod
+import com.dividendstream.app.data.repository.IncomeGoal
+import androidx.compose.ui.draw.clip
 
 @Composable
 fun DashboardScreen(
@@ -429,17 +432,27 @@ private fun IncomeGoalCard(
     state: DashboardUiState,
     snapshot: LiveDividendDto,
     clock: ServerClock,
-    onSet: (BigDecimal?) -> Unit,
+    onSet: (IncomeGoal?) -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
     val goal = state.incomeGoal
-    val perMonth = snapshot.rate.perMonth
+    // What is being looked at, which is not the same as what the goal was set in. Somebody who
+    // wants RM500 a month still wants to know what that is a year, and asking them to edit the
+    // goal to find out would be answering a question with a form.
+    var viewing by remember(goal?.period) { mutableStateOf(goal?.period ?: GoalPeriod.MONTH) }
+
+    val earning = when (viewing) {
+        GoalPeriod.DAY -> snapshot.rate.perDay
+        GoalPeriod.YEAR -> snapshot.rate.perYear
+        GoalPeriod.MONTH -> snapshot.rate.perMonth
+    }
+    val target = goal?.let { GoalPeriods.convert(it.amount, it.period, viewing) }
     val accrued by rememberAccruedAmount(state.streams, clock)
 
     DsCard(modifier = Modifier.fillMaxWidth().clickable { editing = true }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OverlineText(
-                if (goal == null) "Set a monthly income goal" else "Monthly income goal",
+                if (goal == null) "Set an income goal" else "Income goal",
                 modifier = Modifier.weight(1f),
             )
             OverlineText(
@@ -453,19 +466,34 @@ private fun IncomeGoalCard(
         if (goal == null) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Say what you want your holdings to pay each month, and this shows how close " +
-                    "they are -- and how much closer they get every second.",
+                "Say what you want your holdings to pay you -- a day, a month or a year -- " +
+                    "and this shows how close they are, and how much closer every second.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            val reached = if (goal.signum() <= 0) 0f
-            else perMonth.toFloat() / goal.toFloat()
+            val shown = target ?: goal.amount
+            val reached = if (shown.signum() <= 0) 0f else earning.toFloat() / shown.toFloat()
+            val per = GoalPeriods.label(viewing)
+
+            Spacer(Modifier.height(12.dp))
+            // On the card, not in the form. The whole point is being able to flick between
+            // them and back: a figure means one thing a day and quite another a year, and
+            // seeing both is how somebody works out which one they actually care about.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GoalPeriod.entries.forEach { option ->
+                    GoalChip(
+                        text = GoalPeriods.short(option),
+                        selected = option == viewing,
+                        onClick = { viewing = option },
+                    )
+                }
+            }
 
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 FittedFigure(
-                    text = perMonth.formatMoney(snapshot.currency),
+                    text = earning.formatMoney(snapshot.currency),
                     style = MonoFigure.copy(fontSize = MonoFigure.fontSize * 1.6f),
                     color = if (reached >= 1f) DividendColors.Growth
                     else MaterialTheme.colorScheme.onSurface,
@@ -473,7 +501,7 @@ private fun IncomeGoalCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "of ${goal.formatMoney(snapshot.currency)}",
+                    "of ${shown.formatMoney(snapshot.currency)} $per",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -483,9 +511,9 @@ private fun IncomeGoalCard(
             Spacer(Modifier.height(8.dp))
             Text(
                 if (reached >= 1f) {
-                    "You are there -- ${perMonth.formatMoney(snapshot.currency)} a month expected."
+                    "You are there -- ${earning.formatMoney(snapshot.currency)} $per expected."
                 } else {
-                    "${goal.subtract(perMonth).formatMoney(snapshot.currency)} a month to go."
+                    "${shown.subtract(earning).formatMoney(snapshot.currency)} $per to go."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -515,11 +543,12 @@ private fun IncomeGoalCard(
 
 @Composable
 private fun IncomeGoalDialog(
-    current: BigDecimal?,
+    current: IncomeGoal?,
     onDismiss: () -> Unit,
-    onSet: (BigDecimal?) -> Unit,
+    onSet: (IncomeGoal?) -> Unit,
 ) {
-    var text by remember { mutableStateOf(current?.toPlainString().orEmpty()) }
+    var text by remember { mutableStateOf(current?.amount?.toPlainString().orEmpty()) }
+    var period by remember { mutableStateOf(current?.period ?: GoalPeriod.MONTH) }
     val parsed = text.trim().replace(",", "").toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
 
     AlertDialog(
@@ -535,13 +564,28 @@ private fun IncomeGoalDialog(
         text = {
             Column {
                 Text(
-                    "What you would like your holdings to pay you every month.",
+                    "What you would like your holdings to pay you, and how often. You can look " +
+                        "at it as any of the three afterwards.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GoalPeriod.entries.forEach { option ->
+                        GoalChip(
+                            text = GoalPeriods.short(option),
+                            selected = option == period,
+                            onClick = { period = option },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 DsTextField(
-                    label = "Each month",
+                    label = when (period) {
+                        GoalPeriod.DAY -> "Each day"
+                        GoalPeriod.MONTH -> "Each month"
+                        GoalPeriod.YEAR -> "Each year"
+                    },
                     value = text,
                     onValueChange = { text = it },
                     placeholder = "500.00",
@@ -550,7 +594,10 @@ private fun IncomeGoalDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { parsed?.let(onSet) }, enabled = parsed != null) {
+            TextButton(
+                onClick = { parsed?.let { onSet(IncomeGoal(it, period)) } },
+                enabled = parsed != null,
+            ) {
                 Text(
                     "Save",
                     color = if (parsed != null) MaterialTheme.colorScheme.primary
@@ -573,4 +620,71 @@ private fun IncomeGoalDialog(
             }
         },
     )
+}
+
+@Composable
+private fun GoalChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (selected) DividendColors.GrowthGlow
+                else MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/**
+ * Restating a goal over a different stretch of time.
+ *
+ * Through seconds, using the same two constants the dividend engine scales its own rates by --
+ * a month is the 400-year average rather than any particular month, and a year is 365.2425
+ * days. Borrowed rather than picked afresh so that a goal and the income it is compared
+ * against are measured on the same ruler; a month of 30 days here would have the bar creeping
+ * up every time somebody flicked to Day and back.
+ *
+ * Kept at accrual precision rather than rounded to cents, so the round trip is exact: a
+ * monthly goal looked at as a day and back again is the same monthly goal.
+ */
+private object GoalPeriods {
+
+    private const val SECONDS_PER_DAY = 86_400L
+    private const val SECONDS_PER_MONTH = 2_629_746L
+    private const val SECONDS_PER_YEAR = 31_556_952L
+
+    private fun seconds(period: GoalPeriod): Long = when (period) {
+        GoalPeriod.DAY -> SECONDS_PER_DAY
+        GoalPeriod.MONTH -> SECONDS_PER_MONTH
+        GoalPeriod.YEAR -> SECONDS_PER_YEAR
+    }
+
+    fun convert(amount: BigDecimal, from: GoalPeriod, to: GoalPeriod): BigDecimal {
+        if (from == to) return amount
+        return amount
+            .multiply(BigDecimal.valueOf(seconds(to)))
+            .divide(BigDecimal.valueOf(seconds(from)), Precision.AMOUNT, java.math.RoundingMode.HALF_UP)
+    }
+
+    fun short(period: GoalPeriod): String = when (period) {
+        GoalPeriod.DAY -> "Day"
+        GoalPeriod.MONTH -> "Month"
+        GoalPeriod.YEAR -> "Year"
+    }
+
+    fun label(period: GoalPeriod): String = when (period) {
+        GoalPeriod.DAY -> "a day"
+        GoalPeriod.MONTH -> "a month"
+        GoalPeriod.YEAR -> "a year"
+    }
 }
