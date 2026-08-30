@@ -2,6 +2,8 @@ package com.dividendstream.app.ui.ledger
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -787,8 +789,13 @@ private fun TotalTile(
 
 @Composable
 private fun FundSortRow(sort: FundSort, onSelect: (FundSort) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OverlineText("Sort")
+    // Four chips and a label do not fit across a phone, and the last one came out as
+    // "Add / ed". They keep their size and the row scrolls instead.
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OverlineText("Sort", maxLines = 1, softWrap = false)
         Spacer(Modifier.width(10.dp))
         FundSort.entries.forEach { option ->
             val selected = option == sort
@@ -808,6 +815,8 @@ private fun FundSortRow(sort: FundSort, onSelect: (FundSort) -> Unit) {
                     style = MaterialTheme.typography.labelMedium,
                     color = if (selected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -1353,8 +1362,13 @@ private fun Legend(label: String, tint: Color) {
 
 @Composable
 private fun SortRow(sort: LedgerSort, onSelect: (LedgerSort) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OverlineText("Sort")
+    // Four chips and a label do not fit across a phone, and the last one came out as
+    // "Add / ed". They keep their size and the row scrolls instead.
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OverlineText("Sort", maxLines = 1, softWrap = false)
         Spacer(Modifier.width(10.dp))
         LedgerSort.entries.forEach { option ->
             val selected = option == sort
@@ -1374,6 +1388,8 @@ private fun SortRow(sort: LedgerSort, onSelect: (LedgerSort) -> Unit) {
                     style = MaterialTheme.typography.labelMedium,
                     color = if (selected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -1533,7 +1549,7 @@ internal fun AddChip(
     ) {
         Icon(Icons.Default.Add, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
-        OverlineText(label, color = tint)
+        OverlineText(label, color = tint, maxLines = 1, softWrap = false)
     }
 }
 

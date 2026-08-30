@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.dividendstream"
-version = "1.0.17"
+version = "1.0.18"
 
 kotlin {
     jvmToolchain(21)

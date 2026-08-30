@@ -35,10 +35,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dividendstream.app.core.AppError
 import com.dividendstream.app.ui.theme.DividendColors
@@ -52,12 +58,56 @@ fun OverlineText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    /**
+     * Pass 1 for a label inside something that sets its own width -- a chip, a button.
+     *
+     * A two-word label in a row that has run out of room breaks across two lines, and "+ OUT"
+     * arriving as "+ OU / T" reads as a rendering fault rather than as a button.
+     */
+    maxLines: Int = Int.MAX_VALUE,
+    softWrap: Boolean = true,
 ) {
     Text(
         text = text.uppercase(Locale.US),
         style = OverlineLabel,
         color = color,
         modifier = modifier,
+        maxLines = maxLines,
+        softWrap = softWrap,
+    )
+}
+
+/**
+ * A figure that shrinks rather than losing its last digits.
+ *
+ * `maxLines = 1` on a fixed size does not make a number fit -- it cuts it off, and a money
+ * figure missing its end is worse than useless: RM6,225.43 rendered as "RM6,225." is a
+ * different, wrong, and entirely believable amount. Everything here is monospaced, so the
+ * length of the string is the width of the string, and stepping the size down until it stops
+ * overflowing settles in a frame or two and then stays put.
+ *
+ * Keyed on the length rather than on the text so a counter ticking through its last decimals
+ * does not restart the search sixty times a second.
+ */
+@Composable
+fun FittedFigure(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MonoFigure,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    minScale: Float = 0.62f,
+) {
+    var scale by remember(text.length) { mutableFloatStateOf(1f) }
+    Text(
+        text = text,
+        modifier = modifier,
+        style = style.copy(fontSize = style.fontSize * scale, lineHeight = style.lineHeight * scale),
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && scale > minScale) scale *= 0.92f
+        },
     )
 }
 
@@ -88,14 +138,9 @@ fun StatTile(
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     DsCard(modifier = modifier, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
-        OverlineText(label)
+        OverlineText(label, maxLines = 1, softWrap = false)
         Spacer(Modifier.height(6.dp))
-        Text(
-            text = value,
-            style = MonoFigure,
-            color = valueColor,
-            maxLines = 1,
-        )
+        FittedFigure(text = value, color = valueColor)
     }
 }
 
@@ -110,7 +155,17 @@ fun SectionHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+        // The action is measured first and the title takes what is left. The other way round,
+        // a long heading leaves the buttons beside it too narrow to hold their own labels.
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(8.dp))
         action?.invoke()
     }
 }

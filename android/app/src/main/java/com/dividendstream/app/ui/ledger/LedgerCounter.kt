@@ -7,6 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -99,8 +102,18 @@ fun SignedLiveAmountText(
     val decimalPoint = formatted.indexOf('.')
     val steadyEnd = if (decimalPoint < 0) formatted.length else decimalPoint + 1 + steadyDecimals
 
+    // The counter is the largest thing on any screen it appears on, and at RM1,393.123456 on a
+    // narrow phone it did not fit -- so it was cut off, leaving a lone "RM" where the headline
+    // total should be. It shrinks to fit instead. Keyed on the length rather than the text: the
+    // last decimals change every frame and the width does not, this being monospaced.
+    var scale by remember(formatted.length, currency, negative) { mutableFloatStateOf(1f) }
+    val fitted = style.copy(
+        fontSize = style.fontSize * scale,
+        lineHeight = style.lineHeight * scale,
+    )
+
     val text = buildAnnotatedString {
-        withStyle(SpanStyle(color = colour, fontSize = style.fontSize * 0.55f)) {
+        withStyle(SpanStyle(color = colour, fontSize = fitted.fontSize * 0.55f)) {
             if (negative) append("-")
             append(currencySymbol(currency))
             append(" ")
@@ -116,6 +129,14 @@ fun SignedLiveAmountText(
     }
 
     Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
-        Text(text = text, style = style, maxLines = 1)
+        Text(
+            text = text,
+            style = fitted,
+            maxLines = 1,
+            softWrap = false,
+            onTextLayout = { result ->
+                if (result.hasVisualOverflow && scale > 0.5f) scale *= 0.92f
+            },
+        )
     }
 }

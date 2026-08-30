@@ -40,12 +40,12 @@ import com.dividendstream.app.core.formatFull
 import com.dividendstream.app.core.formatMoney
 import com.dividendstream.app.data.remote.LedgerDto
 import com.dividendstream.app.data.remote.LiveDividendDto
+import com.dividendstream.app.ui.components.AccrualProgressBar
 import com.dividendstream.app.ui.components.DsCard
 import com.dividendstream.app.ui.components.ErrorBanner
 import com.dividendstream.app.ui.components.LoadingBox
 import com.dividendstream.app.ui.components.OverlineText
 import com.dividendstream.app.ui.components.StaleDataBanner
-import com.dividendstream.app.ui.components.StatTile
 import com.dividendstream.app.ui.components.UpdateAvailableBanner
 import com.dividendstream.app.ui.components.describeAge
 import com.dividendstream.app.ui.components.rememberAccruedAmount
@@ -56,20 +56,22 @@ import com.dividendstream.app.ui.ledger.rememberNetAccrued
 import com.dividendstream.app.ui.theme.DividendColors
 import com.dividendstream.app.ui.theme.MonoFigure
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
 /**
  * Everything at once: dividends and the ledger, on one screen.
  *
- * The headline is a **rate**, not a total, and that is the whole design of this screen rather
- * than a stylistic choice. A dividend accrues across its own cycle; the ledger accrues across a
- * calendar month. Adding those two running figures would produce a number measured over two
- * different windows at the same time — true of neither, and impossible to explain. Rates carry
- * no window at all: ringgit per second plus ringgit per second is ringgit per second.
+ * It opens with today, because that is the question the app is asked several times a day and
+ * standing at a counter is where it gets asked. It used to open with a total and a per-second
+ * rate — a screen and a half of figures nobody consults hourly, in front of everything that
+ * could be acted on. Both are still here; they are simply no longer first.
  *
- * The two running totals still appear, in their own cards, each labelled with the window it is
- * measured over. Whoever reads a figure here can always tell what it counts.
+ * A rate is the one thing that may combine the two halves of the app. A dividend accrues across
+ * its own cycle and the ledger across a calendar month, so adding the two running totals would
+ * give a number measured over two windows at once — true of neither. Ringgit per second plus
+ * ringgit per second is ringgit per second, so the pace is combined and the totals are not.
  */
 @Composable
 fun HomeScreen(
@@ -112,6 +114,16 @@ fun HomeScreen(
                 }
             }
 
+            ledger?.let { loaded ->
+                item {
+                    TodayCard(
+                        ledger = loaded,
+                        clock = viewModel.serverClock,
+                        onClick = onOpenLedger,
+                    )
+                }
+            }
+
             item {
                 TotalCard(
                     snapshot = snapshot,
@@ -120,8 +132,6 @@ fun HomeScreen(
                     clock = viewModel.serverClock,
                 )
             }
-
-            item { CombinedRateCard(snapshot, ledger) }
 
             item {
                 DividendCard(
@@ -162,6 +172,77 @@ private fun Greeting(userName: String) {
 }
 
 /**
+ * What is left to spend today.
+ *
+ * The allowance is the ledger's own net per day: what the declared income leaves after the
+ * declared outgoings, spread evenly. Anything written down today moves it, because moving this
+ * is the point of writing it down.
+ *
+ * Dividends are deliberately left out. They have not been paid, so they are not money anybody
+ * can spend today — the same reason the funds hold only what has arrived.
+ */
+@Composable
+private fun TodayCard(ledger: LedgerDto, clock: ServerClock, onClick: () -> Unit) {
+    val today = LocalDate.ofInstant(clock.now(), ZoneId.systemDefault())
+    val todays = ledger.entries.filter { it.occurredOn == today }
+    val spent = todays.filter { it.direction == "EXPENSE" }
+        .fold(BigDecimal.ZERO) { sum, entry -> sum.add(entry.amount) }
+    val earned = todays.filter { it.direction != "EXPENSE" }
+        .fold(BigDecimal.ZERO) { sum, entry -> sum.add(entry.amount) }
+
+    val allowance = ledger.rate.perDay.add(earned)
+    // Nothing declared and nothing written down: there is no day to report on, and a card
+    // reading "RM0.00 left" would look like an answer rather than like an empty ledger.
+    if (allowance.signum() <= 0 && spent.signum() == 0) return
+
+    val left = allowance.subtract(spent)
+    val over = left.signum() < 0
+    val used = if (allowance.signum() <= 0) 1f
+    else spent.toFloat() / allowance.toFloat()
+
+    DsCard(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        contentPadding = PaddingValues(20.dp),
+        border = null,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().background(
+                Brush.horizontalGradient(
+                    listOf(
+                        if (over) DividendColors.Danger.copy(alpha = 0.10f) else DividendColors.GrowthGlow,
+                        Color.Transparent,
+                    ),
+                ),
+            ),
+        ) {
+            Column {
+                OverlineText(if (over) "Over today" else "Left to spend today")
+                Spacer(Modifier.height(10.dp))
+                SignedLiveAmountText(
+                    amount = left,
+                    currency = ledger.currency,
+                    decimals = Precision.AMOUNT,
+                )
+                Spacer(Modifier.height(12.dp))
+                AccrualProgressBar(progress = used)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "${spent.formatMoney(ledger.currency)} spent of " +
+                        "${allowance.formatMoney(ledger.currency)} for today" +
+                        if (earned.signum() > 0) {
+                            ", ${earned.formatMoney(ledger.currency)} of it recorded in"
+                        } else {
+                            ""
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
  * What you have, moving.
  *
  * Two things go in, and neither is a share price. The market value of a portfolio belongs to
@@ -184,6 +265,10 @@ private fun TotalCard(
 ) {
     val currency = ledger?.currency ?: snapshot.currency
     val dividends by rememberAccruedAmount(dividendStreams, clock)
+
+    val perDay = snapshot.rate.perDay.add(ledger?.rate?.perDay ?: BigDecimal.ZERO)
+    val perMonth = snapshot.rate.perMonth.add(ledger?.rate?.perMonth ?: BigDecimal.ZERO)
+    val perYear = snapshot.rate.perYear.add(ledger?.rate?.perYear ?: BigDecimal.ZERO)
 
     // The same sum the ledger screen shows, field for field. It used to be worked out here a
     // second way -- the settled months plus this one, ticking -- and the two screens then
@@ -226,6 +311,23 @@ private fun TotalCard(
                 )
 
                 Spacer(Modifier.height(10.dp))
+                // The pace, as three figures on a line of prose. It had a card of its own, with
+                // the per-second reading to eight decimals and three tiles too narrow to hold a
+                // year's worth of ringgit -- a screenful spent on something nobody acts on, and
+                // the Dividends tab breaks the same rate down properly for anyone who wants it.
+                Text(
+                    if (perDay.signum() == 0) {
+                        "Nothing coming in yet."
+                    } else {
+                        val verb = if (perDay.signum() < 0) "Going out" else "Coming in"
+                        "$verb at ${perDay.formatMoney(currency)} a day, " +
+                            "${perMonth.formatMoney(currency)} a month, " +
+                            "${perYear.formatMoney(currency)} a year."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "Worked out from what you have told the app and what your holdings are " +
                         "expected to pay. An estimate of where you stand, not a bank balance.",
@@ -256,66 +358,6 @@ private fun Component(label: String, value: String, note: String) {
             )
         }
         Text(value, style = MonoFigure, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-    }
-}
-
-/**
- * The one figure that legitimately combines the two halves of the app.
- *
- * Zero on both sides is not hidden: "nothing is coming in yet" is a true and useful thing for
- * a new account to be told, and an empty space would leave somebody wondering whether the
- * screen had failed to load.
- */
-@Composable
-private fun CombinedRateCard(snapshot: LiveDividendDto, ledger: LedgerDto?) {
-    val perSecond = snapshot.rate.perSecond.add(ledger?.netRatePerSecond ?: BigDecimal.ZERO)
-    val perDay = snapshot.rate.perDay.add(ledger?.rate?.perDay ?: BigDecimal.ZERO)
-    val perMonth = snapshot.rate.perMonth.add(ledger?.rate?.perMonth ?: BigDecimal.ZERO)
-    val perYear = snapshot.rate.perYear.add(ledger?.rate?.perYear ?: BigDecimal.ZERO)
-    val negative = perSecond.signum() < 0
-    val currency = snapshot.currency
-
-    DsCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(20.dp), border = null) {
-        Box(
-            modifier = Modifier.fillMaxWidth().background(
-                Brush.horizontalGradient(
-                    listOf(
-                        if (negative) DividendColors.Danger.copy(alpha = 0.10f) else DividendColors.GrowthGlow,
-                        Color.Transparent,
-                    ),
-                ),
-            ),
-        ) {
-            Column {
-                OverlineText(
-                    when {
-                        perSecond.signum() == 0 -> "Nothing coming in yet"
-                        negative -> "Going out, every second"
-                        else -> "Coming in, every second"
-                    },
-                )
-                Spacer(Modifier.height(10.dp))
-                SignedLiveAmountText(
-                    amount = perSecond,
-                    currency = currency,
-                    decimals = Precision.RATE,
-                    steadyDecimals = 8,
-                )
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("Per day", perDay.formatMoney(currency), Modifier.weight(1f))
-                    StatTile("Per month", perMonth.formatMoney(currency), Modifier.weight(1f))
-                    StatTile("Per year", perYear.formatMoney(currency), Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Dividends and your ledger added together. Only the pace is combined — the " +
-                        "two running totals below are measured over different periods.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
