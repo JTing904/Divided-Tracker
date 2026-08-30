@@ -5,6 +5,7 @@ import com.dividendstream.app.core.ServerClock
 import com.dividendstream.app.data.firestore.FirebaseSessionRepository
 import com.dividendstream.app.data.firestore.FirestoreLedgerAdapter
 import com.dividendstream.app.data.firestore.FirestoreLedgerRepository
+import com.dividendstream.app.data.firestore.LedgerMigration
 import com.dividendstream.app.data.local.PendingLedgerStore
 import com.dividendstream.app.data.local.PendingPurchaseStore
 import com.dividendstream.app.data.local.SessionStore
@@ -103,7 +104,10 @@ class AppContainer(application: Application) {
     val firebaseSession by lazy { FirebaseSessionRepository(firebaseAuth, firestore) }
 
     val ledgerSource: LedgerSource by lazy {
-        FirestoreLedgerAdapter(FirestoreLedgerRepository(firestore, firebaseSession, serverClock))
+        FirestoreLedgerAdapter(
+            repository = FirestoreLedgerRepository(firestore, firebaseSession, serverClock),
+            migration = LedgerMigration(ledgerRepository, firestore, firebaseSession),
+        )
     }
 }
 
