@@ -1,0 +1,131 @@
+package com.dividendstream.app.data.firestore
+
+import com.dividendstream.app.core.AppError
+import com.dividendstream.app.core.AppResult
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.FirebaseAuthWeakPasswordException
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.userProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
+import java.io.IOException
+import java.time.Instant
+
+/** Who is signed in, from Firebase's point of view. */
+data class FirebaseAccount(
+    val uid: String,
+    val name: String,
+    val email: String,
+    val baseCurrency: String = "MYR",
+)
+
+/**
+ * Signing in, without a server of ours in the middle.
+ *
+ * Firebase keeps the session itself, on the device, and renews the token in the background.
+ * That quietly removes a whole class of failure this app had: the token expired while the
+ * phone was idle, the refresh went to a server that had gone to sleep, and a person was told
+ * the thing they had just written down could not be saved. There is nothing here to be asleep.
+ *
+ * Errors are translated into the app's own [AppError] rather than surfaced as Firebase
+ * exceptions, so the screens above carry on saying what they said before -- and so that
+ * "your password is wrong" is never reported as something a retry could fix.
+ */
+class FirebaseSessionRepository(
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+) {
+
+    /** The signed-in account, or null. Emits again whenever that changes. */
+    val accounts: Flow<FirebaseAccount?> = callbackFlow {
+        val listener = FirebaseAuth.AuthStateListener { trySend(it.currentUser?.toAccount()) }
+        auth.addAuthStateListener(listener)
+        awaitClose { auth.removeAuthStateListener(listener) }
+    }
+
+    /** Available synchronously, because a Firestore query needs the uid before it can start. */
+    val current: FirebaseAccount? get() = auth.currentUser?.toAccount()
+
+    suspend fun register(name: String, email: String, password: String): AppResult<FirebaseAccount> =
+        attempt {
+            val created = auth.createUserWithEmailAndPassword(email.trim(), password).await()
+            val user = requireNotNull(created.user) { "Firebase created no user" }
+            // The display name lives on the Firebase account so it survives a reinstall; the
+            // profile document holds what Firebase has no field for.
+            user.updateProfile(userProfileChangeRequest { displayName = name.trim() }).await()
+            writeProfile(user.uid, name.trim(), email.trim())
+            FirebaseAccount(user.uid, name.trim(), email.trim())
+        }
+
+    suspend fun login(email: String, password: String): AppResult<FirebaseAccount> = attempt {
+        val result = auth.signInWithEmailAndPassword(email.trim(), password).await()
+        requireNotNull(result.user).toAccount().also { writeProfile(it.uid, it.name, it.email) }
+    }
+
+    /** Takes the Google ID token the Credential Manager already fetches for the old backend. */
+    suspend fun signInWithGoogle(idToken: String): AppResult<FirebaseAccount> = attempt {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val result = auth.signInWithCredential(credential).await()
+        requireNotNull(result.user).toAccount().also { writeProfile(it.uid, it.name, it.email) }
+    }
+
+    fun logout() = auth.signOut()
+
+    /**
+     * Writes the profile, leaving alone anything already there.
+     *
+     * Merged rather than set, and this matters on every sign-in after the first: replacing the
+     * document would put baseCurrency back to its default and quietly re-denominate somebody's
+     * whole ledger.
+     */
+    private suspend fun writeProfile(uid: String, name: String, email: String) {
+        val document = mutableMapOf<String, Any?>(
+            "displayName" to name,
+            "email" to email,
+            "createdAt" to Instant.now().toString(),
+        )
+        val existing = firestore.collection("users").document(uid).get().await()
+        if (!existing.exists()) document["baseCurrency"] = "MYR"
+        firestore.collection("users").document(uid)
+            .set(document.filterValues { it != null }, SetOptions.merge()).await()
+    }
+
+    private fun FirebaseUser.toAccount() = FirebaseAccount(
+        uid = uid,
+        name = displayName?.takeIf { it.isNotBlank() } ?: email?.substringBefore('@').orEmpty(),
+        email = email.orEmpty(),
+    )
+
+    /**
+     * Turns whatever Firebase threw into something a screen can act on.
+     *
+     * The retryable flag is the part that carries weight: it decides whether a failure is
+     * offered a "try again" button, and whether a queued write is held or given up on. A wrong
+     * password is not retryable however many times it is sent.
+     */
+    private inline fun <T> attempt(block: () -> T): AppResult<T> = try {
+        AppResult.Success(block())
+    } catch (ex: FirebaseAuthInvalidCredentialsException) {
+        AppResult.Failure(AppError("INVALID_CREDENTIALS", "That email and password do not match."))
+    } catch (ex: FirebaseAuthInvalidUserException) {
+        AppResult.Failure(AppError("NO_SUCH_USER", "There is no account with that email."))
+    } catch (ex: FirebaseAuthUserCollisionException) {
+        AppResult.Failure(AppError("EMAIL_TAKEN", "That email already has an account. Sign in instead."))
+    } catch (ex: FirebaseAuthWeakPasswordException) {
+        AppResult.Failure(AppError("WEAK_PASSWORD", "Choose a longer password -- at least six characters."))
+    } catch (ex: IOException) {
+        AppResult.Failure(AppError.offline)
+    } catch (ex: Exception) {
+        AppResult.Failure(
+            AppError("SIGN_IN_FAILED", ex.message ?: "Could not sign in. Please try again.", isRetryable = true),
+        )
+    }
+}
