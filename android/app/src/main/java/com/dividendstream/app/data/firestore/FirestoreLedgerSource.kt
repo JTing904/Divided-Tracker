@@ -79,8 +79,16 @@ class FirestoreLedgerSource(
             runCatching { read(document.id, data) }.getOrNull()
         }
 
-    /** Reports a write that Firestore eventually refused. See [put]. */
-    var onWriteFailed: ((Throwable) -> Unit)? = null
+    /**
+     * Reports a write that Firestore eventually refused. See [put].
+     *
+     * Defaulted to a log line rather than to null. Left unset it was a channel that existed
+     * and carried nothing: the rules refused every fund and nobody, including the app, was
+     * told. A refusal that reaches no one is the same as no error handling at all.
+     */
+    var onWriteFailed: (Throwable) -> Unit = { failure ->
+        android.util.Log.e("LedgerWrite", "Firestore refused a write", failure)
+    }
 
     // --- writing --------------------------------------------------------------
     //
@@ -122,7 +130,7 @@ class FirestoreLedgerSource(
         }
         // Not awaited either, and here it matters even more: this runs while the ledger is
         // being read, so waiting for a server would stop the screen appearing at all offline.
-        batch.commit().addOnFailureListener { onWriteFailed?.invoke(it) }
+        batch.commit().addOnFailureListener { onWriteFailed(it) }
     }
 
     fun deleteFlow(id: String) = delete(FLOWS, id)
@@ -145,17 +153,17 @@ class FirestoreLedgerSource(
         val batch = firestore.batch()
         orphans.documents.forEach { batch.delete(it.reference) }
         batch.delete(user.collection(FUNDS).document(id))
-        batch.commit().addOnFailureListener { onWriteFailed?.invoke(it) }
+        batch.commit().addOnFailureListener { onWriteFailed(it) }
     }
 
     private fun put(collection: String, id: String, data: Map<String, Any?>) {
         user.collection(collection).document(id).set(data, SetOptions.merge())
-            .addOnFailureListener { onWriteFailed?.invoke(it) }
+            .addOnFailureListener { onWriteFailed(it) }
     }
 
     private fun delete(collection: String, id: String) {
         user.collection(collection).document(id).delete()
-            .addOnFailureListener { onWriteFailed?.invoke(it) }
+            .addOnFailureListener { onWriteFailed(it) }
     }
 
     private companion object {

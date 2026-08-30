@@ -41,12 +41,22 @@ class LedgerMigration(
         val account = session.current ?: return Outcome.Failed("Sign in again first.")
         val source = FirestoreLedgerSource(firestore, account.uid)
 
-        // Nothing is overwritten. Somebody who has been using the new ledger for a week does
-        // not want a fortnight-old copy of the old one poured on top of it.
+        // Judged one collection at a time rather than all together.
+        //
+        // A single verdict meant a run that got the records across but not the funds could
+        // never be repeated: the ledger was no longer empty, so the second attempt refused,
+        // and the funds stayed missing with no way to ask again. Each kind is now brought
+        // over only if there is none of it here, which leaves a half-finished move able to
+        // finish itself while still never pouring an old ledger onto a used one.
         val existing = source.stream(account.baseCurrency).first()
-        if (existing.flows.isNotEmpty() || existing.entries.isNotEmpty() || existing.funds.isNotEmpty()) {
+        if (existing.flows.isNotEmpty() && existing.entries.isNotEmpty() &&
+            existing.funds.isNotEmpty()
+        ) {
             return Outcome.AlreadyThere
         }
+        val needsFlows = existing.flows.isEmpty()
+        val needsFunds = existing.funds.isEmpty()
+        val needsEntries = existing.entries.isEmpty()
 
         val current = when (val result = api.ledger("MONTH", null)) {
             is AppResult.Success -> result.data.value
@@ -57,7 +67,7 @@ class LedgerMigration(
         //
         // Both are answered whole by any single call: a flow and a fund are things that exist,
         // not things that happened in a window.
-        current.flows.forEach { flow ->
+        if (needsFlows) current.flows.forEach { flow ->
             source.put(
                 StoredFlow(
                     id = flow.id,
@@ -76,7 +86,7 @@ class LedgerMigration(
         }
 
         var movements = 0
-        current.funds.forEach { fund ->
+        if (needsFunds) current.funds.forEach { fund ->
             // The API has no created-at for a fund, and settlement walks back from it. The
             // earliest month it has already banked is the honest answer: earlier than that and
             // months it settled long ago would be worked out again from today's figures.
@@ -114,9 +124,9 @@ class LedgerMigration(
         // the window it was asked for and nothing else. The months list says which ones hold
         // anything, so no month is fetched to be told it is empty.
         val entries = mutableMapOf<String, StoredEntry>()
-        current.entries.forEach { entries[it.id] = it.toStored() }
+        if (needsEntries) current.entries.forEach { entries[it.id] = it.toStored() }
 
-        val months = current.months.filter { it.entryCount > 0 }.map { it.month }
+        val months = if (needsEntries) current.months.filter { it.entryCount > 0 }.map { it.month } else emptyList()
         for (month in months) {
             if (month == YearMonth.now(zone).toString()) continue
             when (val result = api.ledger("MONTH", month)) {
