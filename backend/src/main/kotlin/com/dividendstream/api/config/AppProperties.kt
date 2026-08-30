@@ -132,8 +132,12 @@ data class ReleaseProperties(
     val minimumClient: String = "",
 
     /**
-     * Identifies the running build. Render exposes the deployed SHA as RENDER_GIT_COMMIT; other
-     * hosts have their own name for it, and locally there is none.
+     * Identifies the running build, in whatever terms its host offers.
+     *
+     * A commit SHA on Render and on Cloud Build; a revision name on Cloud Run, which names no
+     * commit but does change with every deploy. Both answer the question this is actually put
+     * to -- whether what is running is what was last pushed. Blank locally, where there is no
+     * deploy to identify.
      */
     val commit: String = "",
 )

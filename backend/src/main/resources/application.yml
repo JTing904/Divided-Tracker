@@ -93,8 +93,12 @@ dividend-stream:
     # Only set MINIMUM_CLIENT for a change older clients genuinely cannot survive: it locks
     # them out of their own data until they update.
     minimum-client: ${MINIMUM_CLIENT:}
-    # Render publishes the deployed SHA under this name. Other hosts use their own.
-    commit: ${RENDER_GIT_COMMIT:}
+    # Whatever the host calls the thing that identifies this build, in the order they are
+    # likely to exist. Render sets RENDER_GIT_COMMIT to the deployed SHA; Cloud Build passes
+    # COMMIT_SHA where a trigger is configured to; Cloud Run always sets K_REVISION, which is
+    # not a SHA but does change on every deploy -- enough to answer "did my push land?", which
+    # is the only question this field is ever asked.
+    commit: ${RENDER_GIT_COMMIT:${COMMIT_SHA:${K_REVISION:}}}
   dividends:
     backfill-settled-cycles: ${DIVIDEND_BACKFILL:true}
     backfill-window-days: 400
