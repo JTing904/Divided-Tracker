@@ -109,7 +109,10 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "Dividend Stream"
-            packageVersion = "1.0.17"
+            // Taken from the project version rather than written out again. Kept separately it
+            // drifted -- 1.0.18 shipped inside an installer still calling itself 1.0.17, and an
+            // .msi whose version has not moved is one Windows declines to treat as an upgrade.
+            packageVersion = project.version.toString()
             description = "Watch your expected dividends accumulate in real time"
             vendor = "Dividend Stream"
 
