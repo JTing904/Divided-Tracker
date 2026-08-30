@@ -60,8 +60,13 @@ class LedgerMigration(
 
         val current = when (val result = api.ledger("MONTH", null)) {
             is AppResult.Success -> result.data.value
-            is AppResult.Failure -> return Outcome.Failed(result.error.message)
+            is AppResult.Failure -> return Outcome.Failed("reading the old ledger: " + result.error.message)
         }
+        android.util.Log.i(
+            "LedgerMove",
+            "old ledger has flows=${current.flows.size} funds=${current.funds.size} " +
+                "entries=${current.entries.size}; needs flows=$needsFlows funds=$needsFunds entries=$needsEntries",
+        )
 
         // --- what repeats, and where it goes ---------------------------------
         //

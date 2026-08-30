@@ -51,6 +51,11 @@ class FirestoreLedgerAdapter(
                     // out -- and giving up until the app is restarted would leave somebody
                     // staring at an empty ledger with no way to ask again.
                     val outcome = runCatching { move.run() }
+                    // Logged whatever happens. Giving up was the one path with nothing to say
+                    // for it: the old server was asleep, the read timed out, the move returned
+                    // "failed" to a caller that discarded it, and the funds were simply absent
+                    // with no record anywhere that they had even been attempted.
+                    android.util.Log.i("LedgerMove", "outcome=" + (outcome.getOrNull() ?: outcome.exceptionOrNull()))
                     val moved = outcome.getOrNull() is LedgerMigration.Outcome.Moved ||
                         outcome.getOrNull() is LedgerMigration.Outcome.AlreadyThere
                     if (!moved) migrated.set(false)
