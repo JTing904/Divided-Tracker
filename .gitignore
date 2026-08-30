@@ -42,3 +42,10 @@ desktop.ini
 
 # Build outputs and packaged binaries
 dist/
+
+# Firebase client config. Not a credential in the usual sense -- the key inside it ships in
+# every APK and access is governed by the Firestore rules, not by keeping it quiet. Kept out
+# anyway because this repository is public and the project's own rule is that nothing of the
+# sort is committed: a stranger holding it can at least burn the free tier's auth quota.
+# Download it again from console.firebase.google.com -> project settings -> your apps.
+android/app/google-services.json

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.google.services)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -43,6 +44,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
+    }
+
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
@@ -78,6 +83,12 @@ dependencies {
 
     // Google sign-in. Credential Manager is the supported route now that the old
     // GoogleSignInClient is deprecated; googleid supplies the request type it takes.
+    // Firestore holds the data and Auth says whose it is. The BoM pins the two to versions
+    // that were released together, which is the only supported way to combine them.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.googleid)
@@ -95,4 +106,11 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // The money engine's own tests came across from the backend unchanged, and they are
+    // written against JUnit 5 and AssertJ. Rewriting 339 lines of assertions by hand to suit
+    // the runner already here is exactly the kind of edit that quietly changes what is being
+    // asserted, so the runner moves instead. Vintage keeps the JUnit 4 tests running.
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.assertj.core)
+    testRuntimeOnly(libs.junit.vintage.engine)
 }

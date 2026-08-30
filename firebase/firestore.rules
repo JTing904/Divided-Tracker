@@ -1,0 +1,131 @@
+rules_version = '2';
+
+// Who may read and write what.
+//
+// This file carries a job that used to belong to a Spring application: it is the last thing
+// standing between one person's ledger and everybody else's. The client checks nothing an
+// attacker cannot switch off, because the client is on their phone. These rules run on
+// Google's side of the wire and are the only rules that are actually enforced.
+//
+// Everything a person owns lives under users/{uid}, which makes the central rule a single
+// comparison rather than a field on every document that somebody will eventually forget to
+// set. A document that is not under a uid is not reachable at all.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- the one rule everything else is built on --------------------------
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // ---- money -------------------------------------------------------------
+    //
+    // Stored as a *string*, never as a number, and this is the rule that keeps it that way.
+    //
+    // Firestore numbers are IEEE doubles. A ledger that stores RM0.29 as a double is a ledger
+    // that will eventually disagree with itself by a cent and be unable to say why, which is
+    // the whole reason the database this replaces used NUMERIC. The clients parse these back
+    // into BigDecimal, which has no such failure -- but only for as long as nothing writes a
+    // bare number here, and only these rules can promise that.
+    function isMoney(value) {
+      return value is string && value.matches('^-?[0-9]{1,12}(\\.[0-9]{1,12})?$');
+    }
+
+    function isDate(value) {
+      return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isDirection(value) {
+      return value in ['INCOME', 'EXPENSE'];
+    }
+
+    // ---- the person --------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      // The uid is the document id, so a person cannot create a profile that is not their own
+      // however the request is put together.
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly(['displayName', 'email', 'baseCurrency', 'createdAt'])
+        && incoming().baseCurrency is string
+        && incoming().baseCurrency.size() == 3;
+      // Deliberately absent: deleting a profile would orphan everything beneath it, since
+      // Firestore does not cascade. Removing an account is a deliberate act that has to walk
+      // the subcollections, not something a stray call can do.
+      allow delete: if false;
+    }
+
+    // ---- what repeats ------------------------------------------------------
+    match /users/{uid}/cashFlows/{flowId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly([
+             'name', 'direction', 'amount', 'period', 'category', 'currency',
+             'arrivesOn', 'arrivesMonth', 'startsOn', 'endsOn'
+           ])
+        && incoming().name is string
+        && incoming().name.size() > 0
+        && incoming().name.size() <= 80
+        && isDirection(incoming().direction)
+        && isMoney(incoming().amount)
+        && incoming().period in ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']
+        && isDate(incoming().startsOn)
+        && (!('endsOn' in incoming()) || incoming().endsOn == null || isDate(incoming().endsOn));
+    }
+
+    // ---- what happened once ------------------------------------------------
+    match /users/{uid}/entries/{entryId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly(['occurredOn', 'direction', 'amount', 'category', 'note'])
+        && isDate(incoming().occurredOn)
+        && isDirection(incoming().direction)
+        && isMoney(incoming().amount);
+    }
+
+    // ---- where it goes -----------------------------------------------------
+    match /users/{uid}/funds/{fundId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly(['name', 'percent', 'icon', 'position', 'createdAt'])
+        && incoming().name is string
+        && incoming().name.size() > 0
+        && incoming().name.size() <= 60
+        && isMoney(incoming().percent);
+    }
+
+    // ---- money moved into and out of a fund --------------------------------
+    match /users/{uid}/fundMovements/{movementId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && incoming().keys().hasOnly([
+             'fundId', 'occurredOn', 'direction', 'amount', 'note', 'source', 'settledMonth'
+           ])
+        && incoming().fundId is string
+        && isDate(incoming().occurredOn)
+        && incoming().direction in ['DEPOSIT', 'WITHDRAWAL']
+        && isMoney(incoming().amount)
+        && incoming().source in ['HAND', 'MONTHLY_SHARE'];
+    }
+
+    // ---- the portfolio, which still has a server behind it for prices ------
+    match /users/{uid}/holdings/{holdingId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    match /users/{uid}/purchases/{purchaseId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ---- everything else ---------------------------------------------------
+    //
+    // Not a formality. Without it a collection added later is readable by the whole internet
+    // until somebody remembers to come back here, and nothing would report that it happened.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
